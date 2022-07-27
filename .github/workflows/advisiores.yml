@@ -1,0 +1,14 @@
+name: get advisories
+
+on: push
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: install cargo deny
+      run: cargo install --locked cargo-deny
+    - name: check advisories
+      run: cargo deny check advisories

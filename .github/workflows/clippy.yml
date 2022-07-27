@@ -1,0 +1,26 @@
+name: clippy
+
+on:
+  push:
+    paths:
+      - '.github/workflows/clippy.yml'
+      - 'src/*'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: add cargo clippy
+      run: rustup component add clippy
+    - name: test
+      run: cargo clippy
