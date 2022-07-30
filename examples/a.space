@@ -1,0 +1,3 @@
+mut asd = 123
+unmut a = 123
+fun main(asd: int)

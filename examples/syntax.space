@@ -1,0 +1,27 @@
+// this is comment
+
+/*
+    this is multi-line comment.
+*/
+
+// this is function
+fun main() {
+    print("hello world!")
+
+    // if "a" == "a" then print("hello world!")
+    if ("a" == "a") {
+        print("hello world!")
+    }
+
+    mut a = 3 // this is mutable variable
+    unmut b = 3 // this is unmutable variable
+
+    // this is scope
+    {
+        // you can't change the value of a variable out of scope.
+        a = 4 // will be NotMutableError
+        mut c = 4
+        // drop out all variable when exit scope
+    }
+    print(c) // will be NotFoundError
+}

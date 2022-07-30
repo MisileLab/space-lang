@@ -1,9 +1,8 @@
 [package]
-name = "rust-template"
+name = "space-lang"
 version = "0.1.0"
 description = "yeah."
-repository = "https://github.com/misilelab/rust-template"
-documentation = "https://docs.rs/rust-template"
+repository = "https://github.com/misilelab/sherry-lang"
 authors = ["MisileLaboratory"]
 readme = "README.md"
 license-file = "LICENSE.md"
