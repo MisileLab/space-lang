@@ -18,10 +18,8 @@ fun main() {
 
     // this is scope
     {
-        // you can't change the value of a variable out of scope.
-        a = 4 // will be Error
-        mut c = 4
-        // drop out all variable when exit scope
+        // you can't use the variable out of scope.
+        unmut a = 4 // this is unmutable, value 4 (not 3)
     }
-    print(c) // will be NotFoundError
+    print(a)
 }
