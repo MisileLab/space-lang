@@ -10,8 +10,8 @@ enum TokenKind {
   FunctionName,
   ArgumentName,
   ArgumentType,
-  Scope(Vec<Token>),
   ArgumentValue,
+  Scope(Vec<Token>),
   String,
   Assign,
   UnMutVariable,
@@ -50,8 +50,22 @@ impl Lexer {
       let c = self.current_char(Some(count));
 
       match c {
+        '/' => {
+          count += 1;
+          if self.current_char(Some(count)) == '/' {
+            while self.current_char(Some(count)) != '\n' {
+              count += 1;
+            }
+          } else if self.current_char(Some(count)) == '*' {
+            while self.current_char(Some(count)) != '*' || self.current_char(Some(count+1)) != '/' {
+              count += 1;
+            }
+          } else if self.current_char(Some(count)) != '\n' {
+            panic!("SyntaxError");
+          }
+        },
         '=' => {
-          if self.get_token_kind(&tokens) == TokenKind::MutVariable || self.get_token_kind(&tokens) == TokenKind::UnMutVariable {
+          if is_variable(get_token_kind(&tokens)) {
             tokens.push( Token { kind: TokenKind::Assign, value: "=".to_string() } );
             count += 1;
           } else {
@@ -127,8 +141,11 @@ impl Lexer {
             "if" => Some(TokenKind::If),
             "and" => Some(TokenKind::Condition(Cond::And)),
             "or" => Some(TokenKind::Condition(Cond::Or)),
+            a if !tokens.clone().into_iter().filter(|x| (is_identifier(x) && x.value == a)).collect::<Vec<Token>>().is_empty() => {
+              Some(TokenKind::ArgumentValue)
+            },
             _ => {
-              if self.get_token_kind(&tokens) == TokenKind::UnMutVariable || self.get_token_kind(&tokens) == TokenKind::MutVariable {
+              if is_variable(get_token_kind(&tokens)) {
                 Some(TokenKind::Identifier)
               } else if self.current_char_no_space(Some(count)) == '(' {
                 Some(TokenKind::FunctionName)
@@ -138,10 +155,10 @@ impl Lexer {
           
           if let Some(k) = kind { 
             tokens.push(Token { kind: k, value: buffer }); 
-          } else if self.get_token_kind(&tokens) == TokenKind::FunctionName {
-            count += 1;
+          } else if get_token_kind(&tokens) == TokenKind::FunctionName {
 
             while self.current_char(Some(count)) != ')' {
+              println!("{:?}", tokens);
               if self.current_char(Some(count)) != '\n' { 
                 if self.current_char_no_space(Some(count)) == ':' {
                   tokens.push( Token { kind: TokenKind::ArgumentName, value: buffer.clone() } );
@@ -156,7 +173,7 @@ impl Lexer {
                   tokens.push( Token { kind: TokenKind::ArgumentType, value: buffer.clone() } );
                   buffer.clear();
                 } else { 
-                  buffer.push(self.current_char(Some(count)));
+                  if self.current_char(Some(count)) != ',' || self.current_char(Some(count)) == '('{ buffer.push(self.current_char(Some(count))); }
                   count += 1;
                 }
               } else {
@@ -182,9 +199,18 @@ impl Lexer {
     }
     self.current_char(Some(counter))
   }
-  fn get_token_kind(&self, tokens: &Vec<Token>) -> TokenKind {
-    return tokens.last().unwrap_or(&Token::default()).kind.clone();
-  }
+}
+
+fn get_token_kind(tokens: &Vec<Token>) -> TokenKind {
+  return tokens.last().unwrap_or(&Token::default()).kind.clone();
+}
+
+fn is_variable(kind: TokenKind) -> bool {
+  return kind == TokenKind::UnMutVariable || kind == TokenKind::MutVariable;
+}
+
+fn is_identifier(x: &Token) -> bool {
+  return x.kind == TokenKind::Identifier || x.kind == TokenKind::ArgumentName;
 }
 
 fn main() {

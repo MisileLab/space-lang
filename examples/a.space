@@ -1,8 +1,0 @@
-mut asd = 123
-unmut a = 123
-fun main(asd: int) {
-    print("hello world!")
-    if "a" == "a" or "b" == "b" and "c" == "c" {
-        print("hello world!")
-    }
-}

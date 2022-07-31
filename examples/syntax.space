@@ -19,7 +19,7 @@ fun main() {
     // this is scope
     {
         // you can't change the value of a variable out of scope.
-        a = 4 // will be NotMutableError
+        a = 4 // will be Error
         mut c = 4
         // drop out all variable when exit scope
     }
