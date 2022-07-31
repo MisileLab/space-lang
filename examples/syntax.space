@@ -15,7 +15,7 @@ fun main() {
         print("hello world!")
     }
 
-    mut a = 3 // this is mutable variable
+    mut a = 3.12 // this is mutable variable
     unmut b = 3 // this is unmutable variable
 
     // this is scope

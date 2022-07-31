@@ -18,7 +18,7 @@ enum TokenKind {
   UnMutVariable,
   MutVariable,
   Identifier,
-  Number,
+  Number(Number),
   If,
   Condition(Cond)
 }
@@ -29,6 +29,12 @@ enum Cond {
   NotEqual,
   Or,
   And
+}
+
+#[derive(Debug, PartialEq, Clone)]
+enum Number {
+  Float,
+  Int
 }
 
 impl Default for TokenKind {
@@ -113,15 +119,25 @@ impl Lexer {
           count += 1;
 
           loop {
-            if count >= limit || self.current_char(count) == '\n' || (
-              self.current_char(count) == '/' && (self.current_char(count + 1) == '/' || self.current_char(count + 1) == '*')
-            ) { break; }
+            if !self.current_char(count).is_numeric() { break; }
 
-            if self.current_char(count).is_numeric() { buffer.push(self.current_char(count)); }
+            buffer.push(self.current_char(count));
             count += 1;
           }
 
-          tokens.push(Token { kind: TokenKind::Number, value: buffer });
+          if self.current_char(count) == '.' {
+            buffer.push('.');
+            count += 1;
+            loop {
+              if !self.current_char(count).is_numeric() { break; }
+              
+              buffer.push(self.current_char(count));
+              count += 1;
+            }
+            tokens.push(Token { kind: TokenKind::Number(Number::Float), value: buffer });
+          } else {
+            tokens.push(Token { kind: TokenKind::Number(Number::Int), value: buffer });
+          }
         }
         _ if c.is_alphabetic() => {
           let mut buffer = String::new();
