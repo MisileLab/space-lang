@@ -4,6 +4,8 @@
     this is multi-line comment.
 */
 
+import module.space
+
 // this is function
 fun main() {
     print("hello world!")
