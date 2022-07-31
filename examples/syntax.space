@@ -9,7 +9,7 @@ fun main() {
     print("hello world!")
 
     // if "a" == "a" then print("hello world!")
-    if "a" == "a" {
+    if "a" == "a" or "b" == "b" and "c" == "c" {
         print("hello world!")
     }
 

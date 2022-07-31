@@ -3,7 +3,7 @@ use std::{fs, env};
 #[derive(Debug)]
 struct Lexer { contents: Vec<char>, counter: usize }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 enum TokenKind {
   None,
   Function,
@@ -19,7 +19,15 @@ enum TokenKind {
   Identifier,
   Number,
   If,
-  Condition
+  Condition(Cond)
+}
+
+#[derive(Debug, PartialEq, Clone)]
+enum Cond {
+  Equal,
+  NotEqual,
+  Or,
+  And
 }
 
 impl Default for TokenKind {
@@ -28,7 +36,7 @@ impl Default for TokenKind {
     }
 }
 
-#[derive(Debug, PartialEq, Default)]
+#[derive(Debug, PartialEq, Default, Clone)]
 struct Token { kind: TokenKind, value: String }
 
 impl Lexer {
@@ -43,8 +51,21 @@ impl Lexer {
 
       match c {
         '=' => {
-          tokens.push( Token { kind: TokenKind::Assign, value: "=".to_string() } );
+          if self.get_token_kind(&tokens) == TokenKind::MutVariable || self.get_token_kind(&tokens) == TokenKind::UnMutVariable {
+            tokens.push( Token { kind: TokenKind::Assign, value: "=".to_string() } );
+            count += 1;
+          } else {
+            count += 1;
+            if self.current_char(Some(count)) == '=' {
+              tokens.push( Token { kind: TokenKind::Condition(Cond::Equal), value: "==".to_string() } );
+            }
+          }
+        },
+        '!' => {
           count += 1;
+          if self.current_char(Some(count)) == '=' {
+            tokens.push( Token { kind: TokenKind::Condition(Cond::NotEqual), value: "!=".to_string() } )
+          }
         },
         '\'' | '\"' => {
           count += 1;
@@ -103,8 +124,11 @@ impl Lexer {
             "unmut" => Some(TokenKind::UnMutVariable),
             "mut" => Some(TokenKind::MutVariable),
             "fun" => Some(TokenKind::Function),
+            "if" => Some(TokenKind::If),
+            "and" => Some(TokenKind::Condition(Cond::And)),
+            "or" => Some(TokenKind::Condition(Cond::Or)),
             _ => {
-              if tokens.last().unwrap_or(&Token::default()).kind == TokenKind::UnMutVariable || tokens.last().unwrap_or(&Token::default()).kind == TokenKind::MutVariable {
+              if self.get_token_kind(&tokens) == TokenKind::UnMutVariable || self.get_token_kind(&tokens) == TokenKind::MutVariable {
                 Some(TokenKind::Identifier)
               } else if self.current_char_no_space(Some(count)) == '(' {
                 Some(TokenKind::FunctionName)
@@ -114,7 +138,7 @@ impl Lexer {
           
           if let Some(k) = kind { 
             tokens.push(Token { kind: k, value: buffer }); 
-          } else if tokens.last().unwrap_or(&Token::default()).kind == TokenKind::FunctionName {
+          } else if self.get_token_kind(&tokens) == TokenKind::FunctionName {
             count += 1;
 
             while self.current_char(Some(count)) != ')' {
@@ -157,6 +181,9 @@ impl Lexer {
       counter -= 1;
     }
     self.current_char(Some(counter))
+  }
+  fn get_token_kind(&self, tokens: &Vec<Token>) -> TokenKind {
+    return tokens.last().unwrap_or(&Token::default()).kind.clone();
   }
 }
 
