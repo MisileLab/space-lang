@@ -1,4 +1,10 @@
-use std::{fs, env, path::Path};
+use std::{
+  fs, 
+  env, 
+  path::Path,
+  collections::HashMap,
+  mem::discriminant
+};
 
 #[derive(Debug)]
 struct Lexer { contents: Vec<char>, path: String }
@@ -6,19 +12,19 @@ struct Lexer { contents: Vec<char>, path: String }
 #[derive(Debug, PartialEq, Clone)]
 enum TokenKind {
   None,
-  Function,
-  FunctionAssignName,
-  FunctionName,
-  ArgumentName,
+  VariableCall,
+  Module(Vec<Token>),
+  Function { name: String, args: HashMap<String, Value> },
+  FunctionCall,
   ArgumentType,
-  Variable,
   Scope(Vec<Token>),
   String,
   Assign,
-  UnMutVariable,
-  MutVariable,
+  Variable{ mutable: bool },
   Identifier,
-  Number(Number),
+  Integer(isize),
+  Float(f64),
+  UInteger(usize),
   If,
   Condition(Cond)
 }
@@ -32,9 +38,11 @@ enum Cond {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-enum Number {
+enum Value {
+  Integer,
   Float,
-  Int
+  UInteger,
+  String
 }
 
 impl Default for TokenKind {
@@ -46,8 +54,34 @@ impl Default for TokenKind {
 #[derive(Debug, PartialEq, Default, Clone)]
 struct Token { kind: TokenKind, value: String }
 
+struct Compiler { variables: HashMap<String, Token>, fuctions: HashMap<String, Token>} 
+
+impl Compiler {
+  fn new() -> Self { Compiler { variables: HashMap::new(), fuctions: HashMap::new() } }
+  fn compile(&mut self, input: Vec<Token>) {
+    for i in input.iter() {
+      match &i.kind {
+        TokenKind::Module(a) => {
+
+        },
+        _ => todo!()
+      }
+    }
+  }
+  fn change_variable(&mut self, name: String, token: Token) {
+    if let TokenKind::Variable { mutable } = token.kind {
+      if mutable {
+        *self.variables.get_mut(&name).unwrap() = token;
+      } else {
+        panic!("Unmutable variable changed.")
+      }
+    };
+  }
+}
+
 impl Lexer {
   pub fn new(contents: String, path: String) -> Self { Self { contents: contents.chars().collect(), path } }
+  #[allow(clippy::expect_fun_call)]
   pub fn lex(&mut self, mut count: usize, limit: usize) -> Vec<Token> {
     let mut tokens: Vec<Token> = Vec::new();
 
@@ -70,7 +104,7 @@ impl Lexer {
           }
         },
         '=' => {
-          if is_variable(get_token_kind(&tokens)) {
+          if discriminant(&get_token_kind(&tokens)) == discriminant(&TokenKind::Variable { mutable: false }) {
             tokens.push( Token { kind: TokenKind::Assign, value: "=".to_string() } );
             count += 1;
           } else {
@@ -134,9 +168,9 @@ impl Lexer {
               buffer.push(self.current_char(count));
               count += 1;
             }
-            tokens.push(Token { kind: TokenKind::Number(Number::Float), value: buffer });
+            tokens.push(Token { kind: TokenKind::Float(buffer.clone().parse().unwrap()), value: buffer });
           } else {
-            tokens.push(Token { kind: TokenKind::Number(Number::Int), value: buffer });
+            tokens.push(Token { kind: TokenKind::Integer(buffer.clone().parse().unwrap()), value: buffer });
           }
         }
         _ if c.is_alphabetic() => {
@@ -152,9 +186,52 @@ impl Lexer {
           }
 
           let kind: Option<TokenKind> = match buffer.as_str() {
-            "unmut" => Some(TokenKind::UnMutVariable),
-            "mut" => Some(TokenKind::MutVariable),
-            "fun" => Some(TokenKind::Function),
+            "unmut" => Some(TokenKind::Variable { mutable: false }),
+            "mut" => Some(TokenKind::Variable { mutable: true } ),
+            "fun" => {
+              buffer.clear();
+              let mut args: HashMap<String, Value> = HashMap::new();
+              let mut fname = String::new();
+              while self.current_char(count) != '(' {
+                if self.current_char(count) != ' ' { fname.push(self.current_char(count)); }
+                count += 1;
+              }
+              count += 1;
+              while self.current_char(count) != ')' {
+
+                if self.current_char(count) != '\n' { 
+                  if self.current_char_no_space(count) == ':' {
+                    let name: String = buffer.clone().chars().filter(|x| x != &' ').collect();
+                    buffer.clear();
+                    count += 1;
+  
+                    while self.current_char(count) != ')' && self.current_char(count) != ',' {
+                      buffer.push(self.current_char(count));
+                      count += 1;
+                    }
+  
+                    if !name.is_empty() { 
+                      let value = match buffer.as_str().chars().filter(|x| x != &' ').collect::<String>().as_str() {
+                        "Integer" => Value::Integer,
+                        "Float" => Value::Float,
+                        "UInt" => Value::UInteger,
+                        "String" => Value::String,
+                        _ => panic!("SyntaxError {}", buffer.clone())
+                      };
+
+                      args.insert(name, value);
+                    }
+                    buffer.clear();
+                  } else { 
+                    if self.current_char(count) != ',' || self.current_char(count) == '('{ buffer.push(self.current_char(count)); }
+                    count += 1;
+                  }
+                } else {
+                  count += 1;
+                }
+              }
+              Some(TokenKind::Function{ name: fname, args })
+            },
             "if" => Some(TokenKind::If),
             "and" => Some(TokenKind::Condition(Cond::And)),
             "or" => Some(TokenKind::Condition(Cond::Or)),
@@ -164,48 +241,24 @@ impl Lexer {
                 if self.current_char(count) != ' ' { file.push(self.current_char(count)); }
                 count += 1;
               }
-              let path = Path::new(&format!("{}/{}", self.path, &file).to_string()).to_str().unwrap().to_string();
+              let path = Path::new(&format!("{}/{}", self.path, &file)).to_str().unwrap().to_string();
               let contents = fs::read_to_string(path).expect(&format!("Couldn't read this file, result is {}", file));
-              Some(TokenKind::Scope(parser(Lexer::new(contents.clone(), self.path.clone()).lex(0, contents.len()))))
+              Some(TokenKind::Module(Lexer::new(contents.clone(), self.path.clone()).lex(0, contents.len())))
             }
-            a if !tokens.clone().into_iter().filter(|x| (is_identifier(x) && x.value == a)).collect::<Vec<Token>>().is_empty() => {
-              Some(TokenKind::Variable)
+            a if tokens.clone().into_iter().any(|x| (x.kind == TokenKind::Identifier && x.value == a)) => {
+              Some(TokenKind::VariableCall)
             },
             _ => {
-              if is_variable(get_token_kind(&tokens)) {
+              if discriminant(&get_token_kind(&tokens)) == discriminant(&TokenKind::Variable { mutable: false }) {
                 Some(TokenKind::Identifier)
               } else if self.current_char_no_space(count) == '(' {
-                Some(TokenKind::FunctionName)
+                Some(TokenKind::FunctionCall)
               } else { None }
             }
           };
           
           if let Some(k) = kind { 
             tokens.push(Token { kind: k, value: buffer }); 
-          } else if get_token_kind(&tokens) == TokenKind::FunctionName {
-
-            while self.current_char(count) != ')' {
-              if self.current_char(count) != '\n' { 
-                if self.current_char_no_space(count) == ':' {
-                  tokens.push( Token { kind: TokenKind::ArgumentName, value: buffer.clone() } );
-                  buffer.clear();
-                  count += 1;
-
-                  while self.current_char(count) != ')' && self.current_char(count) != ',' {
-                    buffer.push(self.current_char(count));
-                    count += 1;
-                  }
-
-                  tokens.push( Token { kind: TokenKind::ArgumentType, value: buffer.clone() } );
-                  buffer.clear();
-                } else { 
-                  if self.current_char(count) != ',' || self.current_char(count) == '('{ buffer.push(self.current_char(count)); }
-                  count += 1;
-                }
-              } else {
-                count += 1;
-              }
-            }
           }
         },
         _ => {
@@ -213,7 +266,7 @@ impl Lexer {
         }
       }
     }
-    return tokens;
+    tokens
   }
 
   fn current_char(&self, counter: usize) -> char { *self.contents.get(counter).unwrap() }
@@ -225,48 +278,16 @@ impl Lexer {
   }
 }
 
-fn get_token_kind(tokens: &Vec<Token>) -> TokenKind {
-  return tokens.last().unwrap_or(&Token::default()).kind.clone();
+fn get_token_kind(tokens: &[Token]) -> TokenKind {
+  tokens.last().unwrap_or(&Token::default()).kind.clone()
 }
 
-fn is_variable(kind: TokenKind) -> bool {
-  return kind == TokenKind::UnMutVariable || kind == TokenKind::MutVariable;
-}
-
-fn is_identifier(x: &Token) -> bool {
-  return x.kind == TokenKind::Identifier || x.kind == TokenKind::ArgumentName;
-}
-
-fn parser(mut tokens: Vec<Token>) -> Vec<Token> {
-  let a: Vec<Token> = tokens.clone().into_iter().filter(|x| x.kind == TokenKind::Variable ).collect();
-  let b: (Vec<Token>, Vec<usize>);
-  {
-    let mut temp: Vec<usize> = Vec::new();
-    for (i, i2) in tokens.clone().into_iter().enumerate() {
-      if i2.kind == TokenKind::Identifier {
-        temp.push(i+1);
-      }
-    }
-    b = (
-      tokens.clone().into_iter().filter(|x| x.kind == TokenKind::Identifier ).collect(),
-      temp
-    )
-  }
-  for (f, d) in a.iter().enumerate() {
-    let c = b.clone().0.into_iter().filter(|x| x.value == d.value ).collect::<Vec<Token>>();
-    if c.is_empty() { panic!("SyntaxError"); } else {
-      let e = tokens.iter().position(|x| x == d).unwrap();
-      tokens[e] = tokens[b.1[f]].clone();
-    }
-  }
-  tokens
-}
-
+#[allow(clippy::expect_fun_call)]
 fn main() {
   let file = env::args().nth(1).unwrap();
   let path = Path::new(&file).parent().unwrap().to_str().unwrap().to_string();
   let contents = fs::read_to_string(&file).expect(&format!("Couldn't read this file, result is {}", file));
 
   let mut lexer = Lexer::new(contents, path);
-  println!("{:#?}", parser(lexer.lex(0, lexer.contents.len())));
+  println!("{:#?}", lexer.lex(0, lexer.contents.len()));
 }

@@ -7,7 +7,7 @@
 import module.space
 
 // this is function
-fun main() {
+fun main(f: UInt, i: Float) {
     print("hello world!")
 
     // if "a" == "a" then print("hello world!")
