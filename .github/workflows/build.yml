@@ -33,6 +33,8 @@ jobs:
       with:
         version: "14.0"
         cached: ${{ steps.cache-llvm.outputs.cache-hit }}
+    - name: build
+      run: cargo build --release
     - name: Upload build artifacts
       uses: actions/upload-artifact@v3
       with:
