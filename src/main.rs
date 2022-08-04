@@ -1,5 +1,6 @@
 use inkwell::{
-  targets::{Target, TargetTriple}, context::Context, OptimizationLevel
+  context::Context, 
+  OptimizationLevel
 };
 
 use std::{
@@ -279,6 +280,9 @@ impl Compiler {
     while input.get(count).is_some() {
       let i = input.get(count).unwrap();
       match i.clone().kind {
+        TokenKind::Module { tokens, path } => {
+          self.compile(Box::new(tokens), count, None);
+        } ,
         TokenKind::Function { name, args, scope } => {
           let temp = name;
           if self.functions.iter().filter(
@@ -289,8 +293,23 @@ impl Compiler {
             }
           ).next().is_none() {
             functions.insert(temp, i.clone());
+          } else {
+            panic!("Duplicate function")
           }
-        }
+        },
+        TokenKind::FunctionCall => {
+          if self.functions.iter().filter(
+            |x| if let TokenKind::Function { name, args, scope } = &x.kind {
+              name == &i.value
+            } else {
+              false
+            }
+          ).next().is_some() {
+            todo!();
+          } else {
+            panic!("No function");
+          }
+        },
         _ => { todo!(); }
       }
     }
