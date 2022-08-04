@@ -1,3 +1,7 @@
+use inkwell::{
+  targets::{Target, TargetTriple}, context::Context, OptimizationLevel
+};
+
 use std::{
   fs, 
   env, 
@@ -13,10 +17,9 @@ struct Lexer { contents: Vec<char>, path: String }
 enum TokenKind {
   None,
   VariableCall,
-  Module(Vec<Token>),
-  Function { name: String, args: HashMap<String, Value> },
+  Module{ tokens: Vec<Token>, path: String },
+  Function { name: String, args: HashMap<String, Value>, scope: Box<Token> },
   FunctionCall,
-  ArgumentType,
   Scope(Vec<Token>),
   String,
   Assign,
@@ -24,7 +27,6 @@ enum TokenKind {
   Identifier,
   Integer(isize),
   Float(f64),
-  UInteger(usize),
   If,
   Condition(Cond)
 }
@@ -41,7 +43,6 @@ enum Cond {
 enum Value {
   Integer,
   Float,
-  UInteger,
   String
 }
 
@@ -53,31 +54,6 @@ impl Default for TokenKind {
 
 #[derive(Debug, PartialEq, Default, Clone)]
 struct Token { kind: TokenKind, value: String }
-
-struct Compiler { variables: HashMap<String, Token>, fuctions: HashMap<String, Token>} 
-
-impl Compiler {
-  fn new() -> Self { Compiler { variables: HashMap::new(), fuctions: HashMap::new() } }
-  fn compile(&mut self, input: Vec<Token>) {
-    for i in input.iter() {
-      match &i.kind {
-        TokenKind::Module(a) => {
-
-        },
-        _ => todo!()
-      }
-    }
-  }
-  fn change_variable(&mut self, name: String, token: Token) {
-    if let TokenKind::Variable { mutable } = token.kind {
-      if mutable {
-        *self.variables.get_mut(&name).unwrap() = token;
-      } else {
-        panic!("Unmutable variable changed.")
-      }
-    };
-  }
-}
 
 impl Lexer {
   pub fn new(contents: String, path: String) -> Self { Self { contents: contents.chars().collect(), path } }
@@ -214,7 +190,6 @@ impl Lexer {
                       let value = match buffer.as_str().chars().filter(|x| x != &' ').collect::<String>().as_str() {
                         "Integer" => Value::Integer,
                         "Float" => Value::Float,
-                        "UInt" => Value::UInteger,
                         "String" => Value::String,
                         _ => panic!("SyntaxError {}", buffer.clone())
                       };
@@ -230,7 +205,16 @@ impl Lexer {
                   count += 1;
                 }
               }
-              Some(TokenKind::Function{ name: fname, args })
+              count += 1;
+          
+              let mut buffer2 = String::new();
+    
+              while self.current_char(count) != '}' {
+                buffer2.push(self.current_char(count));
+                count += 1;
+              }
+    
+              Some(TokenKind::Function{ name: fname, args, scope: Box::new(Token {kind: TokenKind::Scope(self.lex(count - buffer.len(), count)), value: buffer2})})
             },
             "if" => Some(TokenKind::If),
             "and" => Some(TokenKind::Condition(Cond::And)),
@@ -242,8 +226,8 @@ impl Lexer {
                 count += 1;
               }
               let path = Path::new(&format!("{}/{}", self.path, &file)).to_str().unwrap().to_string();
-              let contents = fs::read_to_string(path).expect(&format!("Couldn't read this file, result is {}", file));
-              Some(TokenKind::Module(Lexer::new(contents.clone(), self.path.clone()).lex(0, contents.len())))
+              let contents = fs::read_to_string(&path).expect(&format!("Couldn't read this file, result is {}", file));
+              Some(TokenKind::Module{tokens: Lexer::new(contents.clone(), self.path.clone()).lex(0, contents.len()), path})
             }
             a if tokens.clone().into_iter().any(|x| (x.kind == TokenKind::Identifier && x.value == a)) => {
               Some(TokenKind::VariableCall)
@@ -282,12 +266,84 @@ fn get_token_kind(tokens: &[Token]) -> TokenKind {
   tokens.last().unwrap_or(&Token::default()).kind.clone()
 }
 
+struct Compiler {
+  context: Context,
+  functions: Vec<Token>
+}
+
+impl Compiler { 
+  fn compile(&self, input: Box<Vec<Token>>, count: usize, variables: Option<HashMap<String, Token>>) {
+    let mut variables = variables.unwrap_or_else(|| HashMap::new());
+    let mut functions: HashMap<String, Token> = HashMap::new();
+    let mut content = String::new();
+    while input.get(count).is_some() {
+      let i = input.get(count).unwrap();
+      match i.clone().kind {
+        TokenKind::Function { name, args, scope } => {
+          let temp = name;
+          if self.functions.iter().filter(
+            |x| if let TokenKind::Function { name, args, scope } = &x.kind {
+              name == &temp
+            } else {
+              false
+            }
+          ).next().is_none() {
+            functions.insert(temp, i.clone());
+          }
+        }
+        _ => { todo!(); }
+      }
+    }
+  }
+}
+
+fn get_modules(input: &Vec<Token>, modules: &mut Vec<Token>) {
+  for i in input.iter() {
+    if let TokenKind::Module { tokens, path } = &i.kind {
+      if modules.iter().filter(|x| x == &i).next().is_none() {
+        modules.push(i.clone());
+        get_modules(&tokens, modules);
+      }
+    }
+  }
+}
+
 #[allow(clippy::expect_fun_call)]
 fn main() {
   let file = env::args().nth(1).unwrap();
+  let release = env::args().nth(2).unwrap_or("true".to_string()).parse::<bool>().unwrap();
   let path = Path::new(&file).parent().unwrap().to_str().unwrap().to_string();
   let contents = fs::read_to_string(&file).expect(&format!("Couldn't read this file, result is {}", file));
 
   let mut lexer = Lexer::new(contents, path);
-  println!("{:#?}", lexer.lex(0, lexer.contents.len()));
+  let contextlol = lexer.lex(0, lexer.contents.len());
+  let mut modules: Vec<Token> = Vec::new();
+  println!("{:#?}", &contextlol);
+  get_modules(&contextlol, &mut modules);
+  println!("a: {:#?}", &modules);
+
+  let level = if release {
+    OptimizationLevel::Aggressive
+  } else {
+    OptimizationLevel::None
+  };
+
+  let context = Context::create();
+  let mut module = Vec::new(); 
+  module.push(context.create_module(&file));
+  for i in modules {
+    if let TokenKind::Module { tokens, path } = i.kind {
+      module.push(context.create_module(&path));
+    }
+  }
+
+  let main_func = contextlol.iter().filter(|x| { 
+    if let TokenKind::Function{name, args, scope} = &x.kind {
+      if name == "main" { return true; } else { return false; }
+    } else {
+      return false;
+    };
+  }).next().unwrap();
+
+  println!("{:#?}", main_func);
 }
