@@ -20,8 +20,19 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
-    - name: Build
-      run: cargo build --release
+    - name: Cache LLVM and Clang
+      id: cache-llvm
+      uses: actions/cache@v2
+      with:
+        path: |
+          C:/Program Files/LLVM
+          ./llvm
+        key: llvm-14.0
+    - name: Install LLVM and Clang
+      uses: KyleMayes/install-llvm-action@v1
+      with:
+        version: "14.0"
+        cached: ${{ steps.cache-llvm.outputs.cache-hit }}
     - name: Upload build artifacts
       uses: actions/upload-artifact@v3
       with:
