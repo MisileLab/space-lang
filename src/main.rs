@@ -273,38 +273,37 @@ struct Compiler {
 }
 
 impl Compiler { 
-  fn compile(&self, input: Box<Vec<Token>>, count: usize, variables: Option<HashMap<String, Token>>) {
-    let mut variables = variables.unwrap_or_else(|| HashMap::new());
+  fn compile(&self, input: Vec<Token>, count: usize, variables: Option<HashMap<String, Token>>) {
+    let mut variables = variables.unwrap_or_else(HashMap::new);
     let mut functions: HashMap<String, Token> = HashMap::new();
     let mut content = String::new();
     while input.get(count).is_some() {
       let i = input.get(count).unwrap();
       match i.clone().kind {
-        TokenKind::Module { tokens, path } => {
-          self.compile(Box::new(tokens), count, None);
+        TokenKind::Module { tokens, path: _ } => {
+          self.compile(tokens, count, None);
         } ,
-        TokenKind::Function { name, args, scope } => {
-          let temp = name;
-          if self.functions.iter().filter(
-            |x| if let TokenKind::Function { name, args, scope } = &x.kind {
-              name == &temp
+        TokenKind::Function { name, args: _, scope: _ } => {
+          if self.functions.iter().find(
+            |x| if let TokenKind::Function { name: name2, args: _, scope: _ } = &x.kind {
+              name2 == &name
             } else {
               false
             }
-          ).next().is_none() {
-            functions.insert(temp, i.clone());
+          ).is_none() {
+            functions.insert(name.clone(), i.clone());
           } else {
             panic!("Duplicate function")
           }
         },
         TokenKind::FunctionCall => {
-          if self.functions.iter().filter(
-            |x| if let TokenKind::Function { name, args, scope } = &x.kind {
+          if self.functions.iter().find(
+            |x| if let TokenKind::Function { name, args: _, scope: _ } = &x.kind {
               name == &i.value
             } else {
               false
             }
-          ).next().is_some() {
+          ).is_some() {
             todo!();
           } else {
             panic!("No function");
@@ -316,12 +315,12 @@ impl Compiler {
   }
 }
 
-fn get_modules(input: &Vec<Token>, modules: &mut Vec<Token>) {
+fn get_modules(input: &[Token], modules: &mut Vec<Token>) {
   for i in input.iter() {
-    if let TokenKind::Module { tokens, path } = &i.kind {
-      if modules.iter().filter(|x| x == &i).next().is_none() {
+    if let TokenKind::Module { tokens, path: _} = &i.kind {
+      if modules.iter().find(|x| x == &i).is_none() {
         modules.push(i.clone());
-        get_modules(&tokens, modules);
+        get_modules(tokens, modules);
       }
     }
   }
@@ -330,7 +329,7 @@ fn get_modules(input: &Vec<Token>, modules: &mut Vec<Token>) {
 #[allow(clippy::expect_fun_call)]
 fn main() {
   let file = env::args().nth(1).unwrap();
-  let release = env::args().nth(2).unwrap_or("true".to_string()).parse::<bool>().unwrap();
+  let release = env::args().nth(2).unwrap_or_else(|| "true".to_string()).parse::<bool>().unwrap();
   let path = Path::new(&file).parent().unwrap().to_str().unwrap().to_string();
   let contents = fs::read_to_string(&file).expect(&format!("Couldn't read this file, result is {}", file));
 
@@ -348,21 +347,20 @@ fn main() {
   };
 
   let context = Context::create();
-  let mut module = Vec::new(); 
-  module.push(context.create_module(&file));
+  let mut module = vec![context.create_module(&file)];
   for i in modules {
-    if let TokenKind::Module { tokens, path } = i.kind {
+    if let TokenKind::Module { tokens: _, path } = i.kind {
       module.push(context.create_module(&path));
     }
   }
 
-  let main_func = contextlol.iter().filter(|x| { 
-    if let TokenKind::Function{name, args, scope} = &x.kind {
-      if name == "main" { return true; } else { return false; }
+  let main_func = contextlol.iter().find(|x| { 
+    if let TokenKind::Function{name, args: _, scope: _} = &x.kind {
+      name == "main"
     } else {
-      return false;
-    };
-  }).next().unwrap();
+      false
+    }
+  }).unwrap();
 
   println!("{:#?}", main_func);
 }
