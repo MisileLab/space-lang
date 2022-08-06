@@ -7,7 +7,7 @@
 import module.space
 
 // this is function
-fun main(f: Integer, i: Float) {
+fun main(f: integer, i: float) return float {
     print("hello world!")
 
     // if "a" == "a" then print("hello world!")
@@ -24,4 +24,5 @@ fun main(f: Integer, i: Float) {
         unmut a = 4 // this is unmutable, value 4 (not 3)
     }
     print(a)
+    end a
 }

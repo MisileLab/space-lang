@@ -1,6 +1,6 @@
 use inkwell::{
   context::Context, 
-  OptimizationLevel
+  OptimizationLevel, module::Module
 };
 
 use std::{
@@ -19,10 +19,12 @@ enum TokenKind {
   None,
   VariableCall,
   Module{ tokens: Vec<Token>, path: String },
-  Function { name: String, args: HashMap<String, Value>, scope: Box<Token> },
-  FunctionCall,
+  Function { name: String, args: HashMap<String, Value>, scope: Box<Token>, rettype: Value },
+  FunctionCall(Vec<Token>),
   Scope(Vec<Token>),
-  String,
+  String(String),
+  End(Box<Token>),
+  Return(Value),
   Assign,
   Variable{ mutable: bool },
   Identifier,
@@ -44,7 +46,8 @@ enum Cond {
 enum Value {
   Integer,
   Float,
-  String
+  String,
+  Void
 }
 
 impl Default for TokenKind {
@@ -107,7 +110,7 @@ impl Lexer {
             count += 1;
           }
 
-          tokens.push( Token { kind: TokenKind::String, value: buffer});
+          tokens.push( Token { kind: TokenKind::String(buffer.clone()), value: buffer});
 
           count += 1;
         },
@@ -165,6 +168,43 @@ impl Lexer {
           let kind: Option<TokenKind> = match buffer.as_str() {
             "unmut" => Some(TokenKind::Variable { mutable: false }),
             "mut" => Some(TokenKind::Variable { mutable: true } ),
+            "end" => {
+              buffer.clear();
+              count += 3;
+              let mut argname = String::new();
+
+              while self.current_char(count).is_alphabetic() {
+                if self.current_char(count) != ' ' { argname.push(self.current_char(count)) }
+                count += 1;
+                println!("{}", &buffer);
+              }
+
+              println!("{:#?}", &buffer);
+
+              Some(TokenKind::End(Box::new(Token { 
+                kind: TokenKind::End(Box::new(self.lex(count - argname.len(), count).into_iter().next().unwrap())), value: buffer.clone()
+              })))
+            },
+            "return" => {
+              buffer.clear();
+              count += 6;
+
+              while self.current_char(count).is_alphabetic() || self.current_char(count) != ' ' {
+                if self.current_char(count) != ' ' { buffer.push(self.current_char(count)); }
+                count += 1;
+                println!("{}", &buffer);
+              }
+
+              Some(TokenKind::Return (
+                match buffer.as_str() {
+                  "integer" => Value::Integer,
+                  "float" => Value::Float,
+                  "string" => Value::String,
+                  "void" => Value::Void,
+                  _ => panic!("SyntaxError {}", buffer.clone())
+                }
+              ))
+            }
             "fun" => {
               buffer.clear();
               let mut args: HashMap<String, Value> = HashMap::new();
@@ -183,21 +223,22 @@ impl Lexer {
                     count += 1;
   
                     while self.current_char(count) != ')' && self.current_char(count) != ',' {
-                      buffer.push(self.current_char(count));
+                      if self.current_char(count) != ' ' { buffer.push(self.current_char(count)); }
                       count += 1;
                     }
   
-                    if !name.is_empty() { 
+                    if !name.is_empty() && !buffer.is_empty() { 
                       let value = match buffer.as_str().chars().filter(|x| x != &' ').collect::<String>().as_str() {
-                        "Integer" => Value::Integer,
-                        "Float" => Value::Float,
-                        "String" => Value::String,
+                        "integer" => Value::Integer,
+                        "float" => Value::Float,
+                        "string" => Value::String,
+                        "void" => Value::Void,
                         _ => panic!("SyntaxError {}", buffer.clone())
                       };
 
                       args.insert(name, value);
+                      buffer.clear();
                     }
-                    buffer.clear();
                   } else { 
                     if self.current_char(count) != ',' || self.current_char(count) == '('{ buffer.push(self.current_char(count)); }
                     count += 1;
@@ -214,8 +255,35 @@ impl Lexer {
                 buffer2.push(self.current_char(count));
                 count += 1;
               }
+
+              let mut buffer3 = String::new();
+              
+              while buffer3.as_str() != "return" {
+                count += 1;
+              }
+
+              count += 1;
+              buffer3.clear();
+
+              while self.current_char(count) != ' ' {
+                buffer3.push(self.current_char(count));
+                count += 1;
+              }
     
-              Some(TokenKind::Function{ name: fname, args, scope: Box::new(Token {kind: TokenKind::Scope(self.lex(count - buffer.len(), count)), value: buffer2})})
+              Some(TokenKind::Function {
+                name: fname, 
+                args, 
+                scope: Box::new(Token {kind: TokenKind::Scope(self.lex(count - buffer.len(), count)), 
+                  value: buffer2
+                }),
+                rettype: match buffer3.as_str() {
+                  "integer" => Value::Integer,
+                  "float" => Value::Float,
+                  "string" => Value::String,
+                  "void" => Value::Void,
+                  _ => panic!("SyntaxError {}", buffer.clone())
+                }
+              })
             },
             "if" => Some(TokenKind::If),
             "and" => Some(TokenKind::Condition(Cond::And)),
@@ -237,7 +305,26 @@ impl Lexer {
               if discriminant(&get_token_kind(&tokens)) == discriminant(&TokenKind::Variable { mutable: false }) {
                 Some(TokenKind::Identifier)
               } else if self.current_char_no_space(count) == '(' {
-                Some(TokenKind::FunctionCall)
+                count += 1;
+                let mut buffer2 = String::new();
+                let mut args = Vec::new();
+                while self.current_char(count) != ')' {
+                  if self.current_char(count) == ',' {
+                    if buffer2.chars().last().unwrap() == '\"' && buffer2.chars().next().unwrap() == '\"' {
+                      args.push(Token { kind: TokenKind::String(buffer2.clone()), value: buffer2.clone() });
+                      buffer2.clear();
+                    } else if buffer2.chars().find(|x| !x.is_numeric()).is_none() && buffer2.chars().find(|x| x == &'.').is_some() {
+                      args.push(Token { kind: TokenKind::Float(buffer2.clone().parse().unwrap()), value: buffer2.clone() });
+                      buffer2.clear();
+                    } else if buffer2.chars().find(|x| !x.is_numeric()).is_none() {
+                      args.push(Token { kind: TokenKind::Integer(buffer2.clone().parse().unwrap()), value: buffer2.clone() });
+                      buffer2.clear();
+                    } else {
+                      buffer2.push(self.current_char(count));
+                    }
+                  }
+                }
+                Some(TokenKind::FunctionCall(args))
               } else { None }
             }
           };
@@ -250,6 +337,8 @@ impl Lexer {
           count += 1;
         }
       }
+
+      println!("{:#?}", &tokens);
     }
     tokens
   }
@@ -267,15 +356,14 @@ fn get_token_kind(tokens: &[Token]) -> TokenKind {
   tokens.last().unwrap_or(&Token::default()).kind.clone()
 }
 
-struct Compiler {
+struct Compiler<'a> {
   context: Context,
-  functions: Vec<Token>
+  module: HashMap<String, Module<'a>>
 }
 
-impl Compiler { 
-  fn compile(&self, input: Vec<Token>, count: usize, variables: Option<HashMap<String, Token>>) {
+impl Compiler<'_> { 
+  fn compile(&self, input: Vec<Token>, mut count: usize, variables: Option<HashMap<String, Token>>) {
     let mut variables = variables.unwrap_or_else(HashMap::new);
-    let mut functions: HashMap<String, Token> = HashMap::new();
     let mut content = String::new();
     while input.get(count).is_some() {
       let i = input.get(count).unwrap();
@@ -283,31 +371,13 @@ impl Compiler {
         TokenKind::Module { tokens, path: _ } => {
           self.compile(tokens, count, None);
         } ,
-        TokenKind::Function { name, args: _, scope: _ } => {
-          if self.functions.iter().find(
-            |x| if let TokenKind::Function { name: name2, args: _, scope: _ } = &x.kind {
-              name2 == &name
-            } else {
-              false
-            }
-          ).is_none() {
-            functions.insert(name.clone(), i.clone());
-          } else {
-            panic!("Duplicate function")
+        TokenKind::Function { name, args, scope: _, rettype } => {
+          let mut arguments = Vec::new();
+          for (i, i2) in args.into_iter() {
+            arguments.push(i2);
           }
         },
-        TokenKind::FunctionCall => {
-          if self.functions.iter().find(
-            |x| if let TokenKind::Function { name, args: _, scope: _ } = &x.kind {
-              name == &i.value
-            } else {
-              false
-            }
-          ).is_some() {
-            todo!();
-          } else {
-            panic!("No function");
-          }
+        TokenKind::FunctionCall(args) => {
         },
         _ => { todo!(); }
       }
@@ -329,7 +399,7 @@ fn get_modules(input: &[Token], modules: &mut Vec<Token>) {
 #[allow(clippy::expect_fun_call)]
 fn main() {
   let file = env::args().nth(1).unwrap();
-  let release = env::args().nth(2).unwrap_or_else(|| "true".to_string()).parse::<bool>().unwrap();
+  let release = true;
   let path = Path::new(&file).parent().unwrap().to_str().unwrap().to_string();
   let contents = fs::read_to_string(&file).expect(&format!("Couldn't read this file, result is {}", file));
 
@@ -338,7 +408,6 @@ fn main() {
   let mut modules: Vec<Token> = Vec::new();
   println!("{:#?}", &contextlol);
   get_modules(&contextlol, &mut modules);
-  println!("a: {:#?}", &modules);
 
   let level = if release {
     OptimizationLevel::Aggressive
@@ -347,15 +416,17 @@ fn main() {
   };
 
   let context = Context::create();
-  let mut module = vec![context.create_module(&file)];
+  let mut module = HashMap::new();
+  module.insert(file.clone(), context.create_module(&file));
+
   for i in modules {
     if let TokenKind::Module { tokens: _, path } = i.kind {
-      module.push(context.create_module(&path));
+      module.insert(file.clone(), context.create_module(&path));
     }
   }
 
   let main_func = contextlol.iter().find(|x| { 
-    if let TokenKind::Function{name, args: _, scope: _} = &x.kind {
+    if let TokenKind::Function {name, args: _, scope: _, rettype: _} = &x.kind {
       name == "main"
     } else {
       false
