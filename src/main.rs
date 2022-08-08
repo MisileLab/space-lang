@@ -62,8 +62,11 @@ pub struct Token { kind: TokenKind, value: String }
 impl Lexer {
   pub fn new(contents: String, path: String) -> Self { Self { contents: contents.chars().collect(), path } }
   #[allow(clippy::expect_fun_call)]
-  pub fn lex(&mut self, mut count: usize, limit: usize) -> Vec<Token> {
+  pub fn lex(&mut self, mut count: usize, limit: usize, variables: Option<Vec<Token>>) -> Vec<Token> {
     let mut tokens: Vec<Token> = Vec::new();
+    for i in variables.unwrap_or(Vec::new()).into_iter() {
+      tokens.push(i)
+    }
 
     while limit > count {
       let c = self.current_char(count);
@@ -124,7 +127,7 @@ impl Lexer {
             count += 1;
           }
 
-          tokens.push( Token { kind: TokenKind::Scope(self.lex(count - buffer.len(), count)), value: buffer} )
+          tokens.push( Token { kind: TokenKind::Scope(self.lex(count - buffer.len(), count, None)), value: buffer} )
         },
         _ if c.is_numeric() => {
           let mut buffer = String::new();
@@ -170,20 +173,20 @@ impl Lexer {
             "mut" => Some(TokenKind::Variable { mutable: true } ),
             "end" => {
               buffer.clear();
-              count += 3;
+              count += 1;
               let mut argname = String::new();
 
-              while self.current_char(count).is_alphabetic() {
-                if self.current_char(count) != ' ' { argname.push(self.current_char(count)) }
+              while self.current_char(count).is_alphabetic() || self.current_char(count).is_numeric() {
+                argname.push(self.current_char(count));
                 count += 1;
-                println!("{}", &buffer);
               }
 
-              println!("{:#?}", &buffer);
+              println!("{:#?}", &argname);
 
               Some(TokenKind::End(Box::new(Token { 
-                kind: TokenKind::End(Box::new(self.lex(count - argname.len(), count).into_iter().next().unwrap())), value: buffer.clone()
-              })))
+                kind: TokenKind::End(Box::new(self.lex(count - argname.len(), count, Some(
+                  tokens.clone().into_iter().filter(|x| x.kind == TokenKind::Identifier).collect::<Vec<Token>>()
+                )).into_iter().last().unwrap())), value: buffer.clone()})))
             },
             "fun" => {
               buffer.clear();
@@ -255,12 +258,12 @@ impl Lexer {
                 count += 1;
               }
 
-              self.lex(count - buffer3.len(), count); // this is infinite loop
+              self.lex(count - buffer3.len(), count, None); // this is infinite loop
 
               Some(TokenKind::Function {
                 name: fname, 
                 args, 
-                scope: Box::new(Token {kind: TokenKind::Scope(self.lex(count - buffer3.len(), count)), 
+                scope: Box::new(Token {kind: TokenKind::Scope(self.lex(count - buffer3.len(), count, None)), 
                   value: buffer3
                 }),
                 rettype: match buffer2.as_str() {
@@ -283,7 +286,7 @@ impl Lexer {
               }
               let path = Path::new(&format!("{}/{}", self.path, &file)).to_str().unwrap().to_string();
               let contents = fs::read_to_string(&path).expect(&format!("Couldn't read this file, result is {}", file));
-              Some(TokenKind::Module{tokens: Lexer::new(contents.clone(), self.path.clone()).lex(0, contents.len()), path})
+              Some(TokenKind::Module{tokens: Lexer::new(contents.clone(), self.path.clone()).lex(0, contents.len(), None), path})
             }
             a if tokens.clone().into_iter().any(|x| (x.kind == TokenKind::Identifier && x.value == a)) => {
               Some(TokenKind::VariableCall)
@@ -353,21 +356,30 @@ impl Compiler<'_> {
     let mut variables = variables.unwrap_or_else(HashMap::new);
     let mut content = String::new();
     while input.get(count).is_some() {
-      let i = input.get(count).unwrap();
-      match i.clone().kind {
+      let token = input.get(count).unwrap();
+      match token.clone().kind {
         TokenKind::Module { tokens, path: _ } => {
           self.compile(tokens, count, None);
         } ,
         TokenKind::Function { name, args, scope: _, rettype } => {
-          let mut arguments = Vec::new();
+          let mut arguments = HashMap::new();
           for (i, i2) in args.into_iter() {
-            arguments.push(i2);
+            arguments.insert(i, i2);
           }
         },
-        TokenKind::FunctionCall(args) => {
+        TokenKind::Variable {mutable: _} => {
+          match input.get(count + 1).unwrap().kind {
+            TokenKind::Identifier => {
+              variables.insert(input.get(count + 1).unwrap().value.clone(), token.clone());
+            },
+            _ => {
+              panic!("CompileError but like SyntaxError")
+            }
+          }
         },
         _ => { todo!(); }
       }
+      count += 1;
     }
   }
 }
@@ -400,7 +412,7 @@ fn main() {
   let contents = fs::read_to_string(&file).expect(&format!("Couldn't read this file, result is {}", file));
 
   let mut lexer = Lexer::new(contents, path);
-  let contextlol = lexer.lex(0, lexer.contents.len());
+  let contextlol = lexer.lex(0, lexer.contents.len(), None);
   let mut modules: Vec<Token> = Vec::new();
   println!("{:#?}", &contextlol);
   get_modules(&contextlol, &mut modules);
