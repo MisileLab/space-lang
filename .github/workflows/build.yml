@@ -21,6 +21,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Cache LLVM and Clang
+      if: ${{ matrix.os }} != 'macos'
       id: cache-llvm
       uses: actions/cache@v2
       with:
@@ -29,10 +30,17 @@ jobs:
           ./llvm
         key: llvm-14.0
     - name: Install LLVM and Clang
+      if: ${{ matrix.os }} != 'macos'
       uses: KyleMayes/install-llvm-action@v1
       with:
         version: "14.0"
         cached: ${{ steps.cache-llvm.outputs.cache-hit }}
+    - name: Install LLVM for macos
+      if: ${{ matrix.os }} == 'macos'
+      run: |
+        brew update
+        brew install llvm
+        brew upgrade
     - name: build
       run: cargo build --release
     - name: Upload build artifacts

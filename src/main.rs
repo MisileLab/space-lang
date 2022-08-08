@@ -12,7 +12,7 @@ use std::{
 };
 
 #[derive(Debug)]
-struct Lexer { contents: Vec<char>, path: String }
+pub struct Lexer { pub contents: Vec<char>, path: String }
 
 #[derive(Debug, PartialEq, Clone)]
 enum TokenKind {
@@ -57,7 +57,7 @@ impl Default for TokenKind {
 }
 
 #[derive(Debug, PartialEq, Default, Clone)]
-struct Token { kind: TokenKind, value: String }
+pub struct Token { kind: TokenKind, value: String }
 
 impl Lexer {
   pub fn new(contents: String, path: String) -> Self { Self { contents: contents.chars().collect(), path } }
@@ -124,7 +124,7 @@ impl Lexer {
             count += 1;
           }
 
-          tokens.push( Token {kind: TokenKind::Scope(self.lex(count - buffer.len(), count)), value: buffer} )
+          tokens.push( Token { kind: TokenKind::Scope(self.lex(count - buffer.len(), count)), value: buffer} )
         },
         _ if c.is_numeric() => {
           let mut buffer = String::new();
@@ -185,26 +185,6 @@ impl Lexer {
                 kind: TokenKind::End(Box::new(self.lex(count - argname.len(), count).into_iter().next().unwrap())), value: buffer.clone()
               })))
             },
-            "return" => {
-              buffer.clear();
-              count += 6;
-
-              while self.current_char(count).is_alphabetic() || self.current_char(count) != ' ' {
-                if self.current_char(count) != ' ' { buffer.push(self.current_char(count)); }
-                count += 1;
-                println!("{}", &buffer);
-              }
-
-              Some(TokenKind::Return (
-                match buffer.as_str() {
-                  "integer" => Value::Integer,
-                  "float" => Value::Float,
-                  "string" => Value::String,
-                  "void" => Value::Void,
-                  _ => panic!("SyntaxError {}", buffer.clone())
-                }
-              ))
-            }
             "fun" => {
               buffer.clear();
               let mut args: HashMap<String, Value> = HashMap::new();
@@ -248,35 +228,42 @@ impl Lexer {
                 }
               }
               count += 1;
-          
-              let mut buffer2 = String::new();
-    
-              while self.current_char(count) != '}' {
-                buffer2.push(self.current_char(count));
-                count += 1;
-              }
 
-              let mut buffer3 = String::new();
+              let mut buffer2 = String::new();
               
-              while buffer3.as_str() != "return" {
+              while buffer2.as_str() != "return" {
+                if self.current_char(count) != ' ' { buffer2.push(self.current_char(count)); }
                 count += 1;
               }
 
               count += 1;
-              buffer3.clear();
+              buffer2.clear();
 
-              while self.current_char(count) != ' ' {
-                buffer3.push(self.current_char(count));
+              while self.current_char(count) != ' ' && self.current_char(count) != '\n' {
+                buffer2.push(self.current_char(count));
                 count += 1;
               }
+
+              while self.current_char(count) == '{' || self.current_char(count) == '\n' {
+                count += 1;
+              }
+
+              let mut buffer3 = String::new();
     
+              while self.current_char(count) != '}' {
+                if self.current_char(count) != '{' { buffer3.push(self.current_char(count)); }
+                count += 1;
+              }
+
+              self.lex(count - buffer3.len(), count); // this is infinite loop
+
               Some(TokenKind::Function {
                 name: fname, 
                 args, 
-                scope: Box::new(Token {kind: TokenKind::Scope(self.lex(count - buffer.len(), count)), 
-                  value: buffer2
+                scope: Box::new(Token {kind: TokenKind::Scope(self.lex(count - buffer3.len(), count)), 
+                  value: buffer3
                 }),
-                rettype: match buffer3.as_str() {
+                rettype: match buffer2.as_str() {
                   "integer" => Value::Integer,
                   "float" => Value::Float,
                   "string" => Value::String,
@@ -309,9 +296,10 @@ impl Lexer {
                 let mut buffer2 = String::new();
                 let mut args = Vec::new();
                 while self.current_char(count) != ')' {
-                  if self.current_char(count) == ',' {
+                  if self.current_char(count + 1) == ')' { buffer2.push(self.current_char(count)); }
+                  if self.current_char(count) == ',' || self.current_char(count + 1) == ')' {
                     if buffer2.chars().last().unwrap() == '\"' && buffer2.chars().next().unwrap() == '\"' {
-                      args.push(Token { kind: TokenKind::String(buffer2.clone()), value: buffer2.clone() });
+                      args.push(Token { kind: TokenKind::String(remove_first_and_last(buffer2.clone())), value: buffer2.clone() });
                       buffer2.clear();
                     } else if buffer2.chars().find(|x| !x.is_numeric()).is_none() && buffer2.chars().find(|x| x == &'.').is_some() {
                       args.push(Token { kind: TokenKind::Float(buffer2.clone().parse().unwrap()), value: buffer2.clone() });
@@ -319,10 +307,11 @@ impl Lexer {
                     } else if buffer2.chars().find(|x| !x.is_numeric()).is_none() {
                       args.push(Token { kind: TokenKind::Integer(buffer2.clone().parse().unwrap()), value: buffer2.clone() });
                       buffer2.clear();
-                    } else {
-                      buffer2.push(self.current_char(count));
                     }
+                  } else {
+                    buffer2.push(self.current_char(count));
                   }
+                  count += 1;
                 }
                 Some(TokenKind::FunctionCall(args))
               } else { None }
@@ -337,8 +326,6 @@ impl Lexer {
           count += 1;
         }
       }
-
-      println!("{:#?}", &tokens);
     }
     tokens
   }
@@ -394,6 +381,15 @@ fn get_modules(input: &[Token], modules: &mut Vec<Token>) {
       }
     }
   }
+}
+
+fn remove_first_and_last(value: String) -> String {
+  let mut chars = value.chars();
+  let mut buffer = String::new();
+  chars.next();
+  chars.next_back();
+  chars.into_iter().for_each(|x| buffer.push(x));
+  buffer
 }
 
 #[allow(clippy::expect_fun_call)]
