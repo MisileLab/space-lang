@@ -8,7 +8,8 @@ use std::{
   env, 
   path::Path,
   collections::HashMap,
-  mem::discriminant
+  mem::discriminant,
+  any::Any
 };
 
 #[derive(Debug)]
@@ -19,7 +20,7 @@ enum TokenKind {
   None,
   VariableCall,
   Module{ tokens: Vec<Token>, path: String },
-  Function { name: String, args: HashMap<String, Value>, scope: Box<Token>, rettype: Value },
+  Function{ name: String, args: HashMap<String, Value>, scope: Box<Token>, rettype: Value },
   FunctionCall(Vec<Token>),
   Scope(Vec<Token>),
   String(String),
@@ -352,7 +353,7 @@ struct Compiler<'a> {
 }
 
 impl Compiler<'_> { 
-  fn compile(&self, input: Vec<Token>, mut count: usize, variables: Option<HashMap<String, Token>>) {
+  fn compile(&self, input: Vec<Token>, mut count: usize, variables: Option<HashMap<String, Token>>, bit: u8) {
     let mut variables = variables.unwrap_or_else(HashMap::new);
     let mut content = String::new();
     while input.get(count).is_some() {
@@ -360,12 +361,27 @@ impl Compiler<'_> {
       match token.clone().kind {
         TokenKind::Module { tokens, path: _ } => {
           self.compile(tokens, count, None);
-        } ,
+        },
         TokenKind::Function { name, args, scope: _, rettype } => {
-          let mut arguments = HashMap::new();
+          let mut arguments = Vec::new();
           for (i, i2) in args.into_iter() {
-            arguments.insert(i, i2);
+            arguments.push(i2.clone());
           }
+          let ret: Any = match rettype {
+            Value::Void => {
+              self.context.void_type()
+            },
+            Value::String => {
+              vec![];
+            },
+            Value::Float => {
+              self.context.f64_type()
+            },
+            Value::Integer => {
+              self.context.i128_type()
+            }
+            _ => { todo!() }
+          };
         },
         TokenKind::Variable {mutable: _} => {
           match input.get(count + 1).unwrap().kind {
