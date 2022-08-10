@@ -1,6 +1,8 @@
 use inkwell::{
   context::Context, 
-  OptimizationLevel, module::Module
+  OptimizationLevel, 
+  module::Module,
+  types::{IntType, FloatType, VoidType}
 };
 
 use std::{
@@ -8,8 +10,7 @@ use std::{
   env, 
   path::Path,
   collections::HashMap,
-  mem::discriminant,
-  any::Any
+  mem::discriminant
 };
 
 #[derive(Debug)]
@@ -33,6 +34,13 @@ enum TokenKind {
   Float(f64),
   If,
   Condition(Cond)
+}
+
+enum RetTypes<'a> {
+  String(Vec<u8>),
+  Int(IntType<'a>),
+  Float(FloatType<'a>),
+  Void(VoidType<'a>)
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -353,7 +361,7 @@ struct Compiler<'a> {
 }
 
 impl Compiler<'_> { 
-  fn compile(&self, input: Vec<Token>, mut count: usize, variables: Option<HashMap<String, Token>>, bit: u8) {
+  fn compile(&self, input: Vec<Token>, mut count: usize, variables: Option<HashMap<String, Token>>) {
     let mut variables = variables.unwrap_or_else(HashMap::new);
     let mut content = String::new();
     while input.get(count).is_some() {
@@ -367,20 +375,19 @@ impl Compiler<'_> {
           for (i, i2) in args.into_iter() {
             arguments.push(i2.clone());
           }
-          let ret: Any = match rettype {
+          let ret: RetTypes = match rettype {
             Value::Void => {
-              self.context.void_type()
+              RetTypes::Void(self.context.void_type())
             },
             Value::String => {
-              vec![];
+              RetTypes::String(Vec::new())
             },
             Value::Float => {
-              self.context.f64_type()
+              RetTypes::Float(self.context.f64_type())
             },
             Value::Integer => {
-              self.context.i128_type()
+              RetTypes::Int(self.context.i128_type())
             }
-            _ => { todo!() }
           };
         },
         TokenKind::Variable {mutable: _} => {
