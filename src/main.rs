@@ -1,8 +1,8 @@
 use inkwell::{
   context::Context, 
   OptimizationLevel, 
-  module::Module,
-  types::{IntType, FloatType, VoidType}
+  module::{Module, Linkage},
+  types::{IntType, FloatType, VoidType, ArrayType, BasicMetadataTypeEnum}
 };
 
 use std::{
@@ -37,7 +37,7 @@ enum TokenKind {
 }
 
 enum RetTypes<'a> {
-  String(Vec<u8>),
+  String(ArrayType<'a>),
   Int(IntType<'a>),
   Float(FloatType<'a>),
   Void(VoidType<'a>)
@@ -357,53 +357,70 @@ fn get_token_kind(tokens: &[Token]) -> TokenKind {
 
 struct Compiler<'a> {
   context: Context,
-  module: HashMap<String, Module<'a>>
+  module: HashMap<String, Module<'a>>,
+  functions: HashMap<String, HashMap<String, usize>>
 }
 
-impl Compiler<'_> { 
-  fn compile(&self, input: Vec<Token>, mut count: usize, variables: Option<HashMap<String, Token>>) {
-    let mut variables = variables.unwrap_or_else(HashMap::new);
-    let mut content = String::new();
-    while input.get(count).is_some() {
-      let token = input.get(count).unwrap();
-      match token.clone().kind {
-        TokenKind::Module { tokens, path: _ } => {
-          self.compile(tokens, count, None);
-        },
-        TokenKind::Function { name, args, scope: _, rettype } => {
-          let mut arguments = Vec::new();
-          for (i, i2) in args.into_iter() {
-            arguments.push(i2.clone());
+fn compile<'b>(compiler: &'b mut Compiler<'b>, mut input: Vec<Token>, mut count: usize, variables: Option<HashMap<String, Token>>) {
+  let mut variables = variables.unwrap_or_else(HashMap::new);
+  let mut content = String::new();
+  while input.get(count).is_some() {
+    let token = input.get(count).unwrap();
+    match token.clone().kind {
+      TokenKind::Module { tokens, path: _ } => {
+        input.extend(tokens);
+      },
+      TokenKind::Function { name, args, scope: _, rettype } => {
+        let mut arguments = Vec::new();
+        let mut numbers: HashMap<String, usize> = HashMap::new();
+        for (i, (i2, i3)) in args.into_iter().enumerate() {
+          arguments.push(i3.clone());
+          numbers.insert(i2, i);
+        }
+        compiler.functions.insert(name.clone(), numbers);
+        let ret: RetTypes = match rettype {
+          Value::Void => {
+            RetTypes::Void(compiler.context.void_type())
+          },
+          Value::String => {
+            RetTypes::String(compiler.context.i8_type().array_type(u32::MAX))
+          },
+          Value::Float => {
+            RetTypes::Float(compiler.context.f128_type())
+          },
+          Value::Integer => {
+            RetTypes::Int(compiler.context.i128_type())
           }
-          let ret: RetTypes = match rettype {
-            Value::Void => {
-              RetTypes::Void(self.context.void_type())
-            },
-            Value::String => {
-              RetTypes::String(Vec::new())
-            },
-            Value::Float => {
-              RetTypes::Float(self.context.f64_type())
-            },
-            Value::Integer => {
-              RetTypes::Int(self.context.i128_type())
-            }
-          };
-        },
-        TokenKind::Variable {mutable: _} => {
-          match input.get(count + 1).unwrap().kind {
-            TokenKind::Identifier => {
-              variables.insert(input.get(count + 1).unwrap().value.clone(), token.clone());
-            },
-            _ => {
-              panic!("CompileError but like SyntaxError")
-            }
+        };
+        let mut arguments2: Vec<BasicMetadataTypeEnum> = Vec::new();
+        for i in arguments {
+          arguments2.push(match i.clone() {
+            Value::Float => { compiler.context.f128_type().into() },
+            Value::Integer => { compiler.context.i128_type().into() },
+            Value::String => { compiler.context.i8_type().array_type(u32::MAX).into() },
+            Value::Void => { panic!("Argument cannot be void type") }
+          });
+        };
+        let function = compiler.module.get("main").unwrap().add_function(&name, match ret {
+          RetTypes::Float(a) => a.fn_type(&arguments2[..], true),
+          RetTypes::Int(a) => a.fn_type(&arguments2[..], true),
+          RetTypes::String(a) => a.fn_type(&arguments2[..], true),
+          RetTypes::Void(a) => a.fn_type(&arguments2[..], true)
+        }, Some(Linkage::Common));
+      },
+      TokenKind::Variable {mutable: _} => {
+        match input.get(count + 1).unwrap().kind {
+          TokenKind::Identifier => {
+            variables.insert(input.get(count + 1).unwrap().value.clone(), token.clone());
+          },
+          _ => {
+            panic!("CompileError but like SyntaxError")
           }
-        },
-        _ => { todo!(); }
-      }
-      count += 1;
+        }
+      },
+      _ => { todo!(); }
     }
+    count += 1;
   }
 }
 
