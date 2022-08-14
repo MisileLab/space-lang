@@ -1,10 +1,3 @@
-use inkwell::{
-  context::Context, 
-  OptimizationLevel, 
-  module::{Module, Linkage},
-  types::{IntType, FloatType, VoidType, ArrayType, BasicMetadataTypeEnum}
-};
-
 use std::{
   fs, 
   env, 
@@ -26,7 +19,6 @@ enum TokenKind {
   Scope(Vec<Token>),
   String(String),
   End(Box<Token>),
-  Return(Value),
   Assign,
   Variable{ mutable: bool },
   Identifier,
@@ -34,13 +26,6 @@ enum TokenKind {
   Float(f64),
   If,
   Condition(Cond)
-}
-
-enum RetTypes<'a> {
-  String(ArrayType<'a>),
-  Int(IntType<'a>),
-  Float(FloatType<'a>),
-  Void(VoidType<'a>)
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -56,7 +41,8 @@ enum Value {
   Integer,
   Float,
   String,
-  Void
+  Void,
+  Any
 }
 
 impl Default for TokenKind {
@@ -280,6 +266,7 @@ impl Lexer {
                   "float" => Value::Float,
                   "string" => Value::String,
                   "void" => Value::Void,
+                  "any" => Value::Any,
                   _ => panic!("SyntaxError {}", buffer.clone())
                 }
               })
@@ -355,69 +342,113 @@ fn get_token_kind(tokens: &[Token]) -> TokenKind {
   tokens.last().unwrap_or(&Token::default()).kind.clone()
 }
 
-struct Compiler<'a> {
-  context: Context,
-  module: HashMap<String, Module<'a>>,
-  functions: HashMap<String, HashMap<String, usize>>
+#[derive(Clone)]
+struct Compiler {
+  functions: HashMap<String, Token>
 }
 
-fn compile<'b>(compiler: &'b mut Compiler<'b>, mut input: Vec<Token>, mut count: usize, variables: Option<HashMap<String, Token>>) {
+fn compile(mut compiler: Compiler, mut input: Vec<Token>, mut count: usize, variables: Option<HashMap<String, Token>>) {
   let mut variables = variables.unwrap_or_else(HashMap::new);
-  let mut content = String::new();
   while input.get(count).is_some() {
     let token = input.get(count).unwrap();
     match token.clone().kind {
       TokenKind::Module { tokens, path: _ } => {
         input.extend(tokens);
       },
-      TokenKind::Function { name, args, scope: _, rettype } => {
-        let mut arguments = Vec::new();
-        let mut numbers: HashMap<String, usize> = HashMap::new();
-        for (i, (i2, i3)) in args.into_iter().enumerate() {
-          arguments.push(i3.clone());
-          numbers.insert(i2, i);
-        }
-        compiler.functions.insert(name.clone(), numbers);
-        let ret: RetTypes = match rettype {
-          Value::Void => {
-            RetTypes::Void(compiler.context.void_type())
-          },
-          Value::String => {
-            RetTypes::String(compiler.context.i8_type().array_type(u32::MAX))
-          },
-          Value::Float => {
-            RetTypes::Float(compiler.context.f128_type())
-          },
-          Value::Integer => {
-            RetTypes::Int(compiler.context.i128_type())
-          }
-        };
-        let mut arguments2: Vec<BasicMetadataTypeEnum> = Vec::new();
-        for i in arguments {
-          arguments2.push(match i.clone() {
-            Value::Float => { compiler.context.f128_type().into() },
-            Value::Integer => { compiler.context.i128_type().into() },
-            Value::String => { compiler.context.i8_type().array_type(u32::MAX).into() },
-            Value::Void => { panic!("Argument cannot be void type") }
-          });
-        };
-        let function = compiler.module.get("main").unwrap().add_function(&name, match ret {
-          RetTypes::Float(a) => a.fn_type(&arguments2[..], true),
-          RetTypes::Int(a) => a.fn_type(&arguments2[..], true),
-          RetTypes::String(a) => a.fn_type(&arguments2[..], true),
-          RetTypes::Void(a) => a.fn_type(&arguments2[..], true)
-        }, Some(Linkage::Common));
+      TokenKind::Function { name, args: _, scope: _, rettype: _ } => {
+        compiler.functions.insert(name.clone(), input.get(count).unwrap().clone());
       },
-      TokenKind::Variable {mutable: _} => {
+      TokenKind::Variable {mutable} => {
         match input.get(count + 1).unwrap().kind {
           TokenKind::Identifier => {
-            variables.insert(input.get(count + 1).unwrap().value.clone(), token.clone());
+            if variables.contains_key(&input.get(count + 1).unwrap().value) && !mutable{
+              panic!("Unmutable variable but changed")
+            } else {
+              variables.insert(input.get(count + 1).unwrap().value.clone(), token.clone());
+            }
           },
           _ => {
             panic!("CompileError but like SyntaxError")
           }
         }
       },
+      TokenKind::FunctionCall(args) => {
+        let token = input.get(count).unwrap();
+        let function = compiler.functions.get(&token.value).expect("no function found");
+
+        if let TokenKind::Function{ name: _, args: arguments, scope, rettype } = &function.kind {
+          let scoper = if let TokenKind::Scope(scope) = scope.kind.clone() {
+            scope
+          } else {
+            panic!("No scope")
+          };
+          let mut realargs = HashMap::new();
+          if arguments.len() != args.len() { panic!("Arguments not equal") }
+          for (i, (i2, i3)) in args.iter().zip(arguments.iter()) {
+            match i3 {
+              &Value::Any => { },
+              &Value::Float => {
+                if discriminant(&i.kind) == discriminant(&TokenKind::Float(0.0)) {
+                  panic!("No return float")
+                }
+              },
+              &Value::Void => {
+                panic!("No void argument")
+              },
+              &Value::String => {
+                if discriminant(&i.kind) == discriminant(&TokenKind::String("".to_string())) {
+                  panic!("No return string")
+                }
+              },
+              &Value::Integer => {
+                if discriminant(&i.kind) == discriminant(&TokenKind::Integer(0)) {
+                  panic!("No return integer")
+                }
+              }
+            }
+            realargs.insert(i2.clone(), i.clone());
+          }
+          compile(compiler.clone(), scoper, 0, Some(realargs));
+          match rettype {
+            &Value::Any => { },
+            &Value::Float => {
+              if let TokenKind::Scope(a) = &scope.kind {
+                if discriminant(&a.iter().filter(
+                  |x| discriminant(&x.kind) == discriminant(&TokenKind::End(Box::new(Token::default()))) )
+                .next().unwrap().kind) == discriminant(&TokenKind::Float(0.0)) {
+                  panic!("No return float")
+                }
+              }
+            },
+            &Value::Void => {
+              panic!("No void argument")
+            },
+            &Value::String => {
+              if let TokenKind::Scope(a) = &scope.kind {
+                if discriminant(&a.iter().filter(
+                  |x| discriminant(&x.kind) == discriminant(&TokenKind::End(Box::new(Token::default()))) )
+                .next().unwrap().kind) == discriminant(&TokenKind::String("".to_string())) {
+                  panic!("No return string")
+                }
+              }
+            },
+            &Value::Integer => {
+              if let TokenKind::Scope(a) = &scope.kind {
+                if discriminant(&a.iter().filter(
+                  |x| discriminant(&x.kind) == discriminant(&TokenKind::End(Box::new(Token::default()))) )
+                .next().unwrap().kind) == discriminant(&TokenKind::Integer(0)) {
+                  panic!("No return int")
+                }
+              }
+            }
+          }
+        }
+      },
+      TokenKind::VariableCall => {
+        input.insert(count, variables.iter().filter(|(x, _)| x == &&token.value).next().unwrap().1.clone());
+        input.remove(count + 1);
+        count -= 1;
+      }
       _ => { todo!(); }
     }
     count += 1;
@@ -456,22 +487,6 @@ fn main() {
   let mut modules: Vec<Token> = Vec::new();
   println!("{:#?}", &contextlol);
   get_modules(&contextlol, &mut modules);
-
-  let level = if release {
-    OptimizationLevel::Aggressive
-  } else {
-    OptimizationLevel::None
-  };
-
-  let context = Context::create();
-  let mut module = HashMap::new();
-  module.insert(file.clone(), context.create_module(&file));
-
-  for i in modules {
-    if let TokenKind::Module { tokens: _, path } = i.kind {
-      module.insert(file.clone(), context.create_module(&path));
-    }
-  }
 
   let main_func = contextlol.iter().find(|x| { 
     if let TokenKind::Function {name, args: _, scope: _, rettype: _} = &x.kind {
