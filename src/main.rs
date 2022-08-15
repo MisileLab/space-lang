@@ -3,7 +3,9 @@ use std::{
   env, 
   path::Path,
   collections::HashMap,
-  mem::discriminant
+  mem::discriminant,
+  any::Any,
+  ptr::read
 };
 
 #[derive(Debug)]
@@ -12,6 +14,7 @@ pub struct Lexer { pub contents: Vec<char>, path: String }
 #[derive(Debug, PartialEq, Clone)]
 enum TokenKind {
   None,
+  Boolean(bool),
   VariableCall,
   Module{ tokens: Vec<Token>, path: String },
   Function{ name: String, args: HashMap<String, Value>, scope: Box<Token>, rettype: Value },
@@ -42,6 +45,7 @@ enum Value {
   Float,
   String,
   Void,
+  Boolean,
   Any
 }
 
@@ -211,6 +215,7 @@ impl Lexer {
                         "float" => Value::Float,
                         "string" => Value::String,
                         "void" => Value::Void,
+                        "boolean" => Value::Boolean,
                         _ => panic!("SyntaxError {}", buffer.clone())
                       };
 
@@ -274,6 +279,8 @@ impl Lexer {
             "if" => Some(TokenKind::If),
             "and" => Some(TokenKind::Condition(Cond::And)),
             "or" => Some(TokenKind::Condition(Cond::Or)),
+            "true" => Some(TokenKind::Boolean(true)),
+            "false" => Some(TokenKind::Boolean(false)),
             "import" => {
               let mut file = String::new();
               while self.current_char(count).is_alphabetic() || ((self.current_char(count) == '/' || self.current_char(count) == '.') && self.current_char(count + 1).is_alphabetic()) || self.current_char(count) == ' ' {
@@ -347,15 +354,14 @@ struct Compiler {
   functions: HashMap<String, Token>
 }
 
-fn compile(mut compiler: Compiler, mut input: Vec<Token>, mut count: usize, variables: Option<HashMap<String, Token>>) {
+fn compile(mut compiler: Compiler, mut input: Vec<Token>, mut count: usize, variables: Option<HashMap<String, Token>>) -> Vec<Token>{
   let mut variables = variables.unwrap_or_else(HashMap::new);
   while input.get(count).is_some() {
-    let token = input.get(count).unwrap();
-    match token.clone().kind {
+    match input.get(count).clone().unwrap().kind.clone() {
       TokenKind::Module { tokens, path: _ } => {
         input.extend(tokens);
       },
-      TokenKind::Function { name, args: _, scope: _, rettype: _ } => {
+      TokenKind::Function { name, args, scope, rettype: _ } => {
         compiler.functions.insert(name.clone(), input.get(count).unwrap().clone());
       },
       TokenKind::Variable {mutable} => {
@@ -364,7 +370,7 @@ fn compile(mut compiler: Compiler, mut input: Vec<Token>, mut count: usize, vari
             if variables.contains_key(&input.get(count + 1).unwrap().value) && !mutable{
               panic!("Unmutable variable but changed")
             } else {
-              variables.insert(input.get(count + 1).unwrap().value.clone(), token.clone());
+              variables.insert(input.get(count + 1).unwrap().value.clone(), input.get(count).unwrap().clone());
             }
           },
           _ => {
@@ -404,6 +410,11 @@ fn compile(mut compiler: Compiler, mut input: Vec<Token>, mut count: usize, vari
                 if discriminant(&i.kind) == discriminant(&TokenKind::Integer(0)) {
                   panic!("No return integer")
                 }
+              },
+              &Value::Boolean => {
+                if discriminant(&i.kind) == discriminant(&TokenKind::Boolean(false)) {
+                  panic!("No return boolean")
+                }
               }
             }
             realargs.insert(i2.clone(), i.clone());
@@ -440,18 +451,73 @@ fn compile(mut compiler: Compiler, mut input: Vec<Token>, mut count: usize, vari
                   panic!("No return int")
                 }
               }
+            },
+            &Value::Boolean => {
+              if let TokenKind::Scope(a) = &scope.kind {
+                if discriminant(&a.iter().filter(
+                  |x| discriminant(&x.kind) == discriminant(&TokenKind::End(Box::new(Token::default()))) )
+                .next().unwrap().kind) == discriminant(&TokenKind::Boolean(true)) {
+                  panic!("No return bool")
+                }
+              }
             }
           }
         }
       },
       TokenKind::VariableCall => {
-        input.insert(count, variables.iter().filter(|(x, _)| x == &&token.value).next().unwrap().1.clone());
+        input.insert(count, variables.iter().filter(|(x, _)| x == &&input.get(count).unwrap().value).next().unwrap().1.clone());
         input.remove(count + 1);
         count -= 1;
+      },
+      TokenKind::Condition(a) => {
+        if let TokenKind::Boolean(cond1) = input.get(count - 1).unwrap().kind {
+          count += 1;
+          if let TokenKind::Boolean(cond2) = compile(
+            compiler.clone(), 
+            vec![input.get(count).unwrap().clone()], 
+            0, 
+            Some(variables.clone())
+          ).iter().last().unwrap().clone().kind {
+            count -= 1;
+            input.remove(count - 1);
+            input.remove(count);
+            input.remove(count + 1);
+            input.insert(count, Token { kind: TokenKind::Boolean(match a {
+              Cond::Equal => { cond1 == cond2 },
+              Cond::And => { cond1 && cond2 },
+              Cond::NotEqual => { cond1 != cond2 },
+              Cond::Or => { cond1 || cond2 }
+            }), value: input.get(count).unwrap().value.clone() })
+          }
+        }
       }
-      _ => { todo!(); }
+      _ => { count += 1; }
     }
     count += 1;
+  }
+  input
+}
+
+fn eval(
+  mut input: Vec<Token>, 
+  parent: Option<&mut Vec<Token>>,
+  mut variables: HashMap<String, Box<dyn Any>>, 
+  mut functions: HashMap<String, Box<dyn Fn(Vec<Box<dyn Any>>) -> dyn Any>>, 
+  mut count: usize
+) {
+  while input.get(count).is_some() {
+    match input.get(count).unwrap().kind {
+      TokenKind::Variable{mutable: _} => {
+        count += 2;
+        let r1 = &mut functions as *mut HashMap<String, Box<dyn Fn(Vec<Box<dyn Any>>) -> dyn Any>>;
+        let r2 = &mut variables as *mut HashMap<String, Box<dyn Any>>;
+        let value = unsafe { 
+          eval(vec![input.get(count).unwrap().clone()], Some(&mut input), read(r2), read(r1), 0); 
+        };
+        variables.insert(input.get(count - 1).unwrap().value.clone(), Box::new(input.get(count).unwrap().kind.clone()));
+      },
+      _ => todo!()
+    }
   }
 }
 
