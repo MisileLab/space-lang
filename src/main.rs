@@ -491,7 +491,7 @@ fn compile(mut compiler: Compiler, mut input: Vec<Token>, mut count: usize, vari
           }
         }
       }
-      _ => { count += 1; }
+      _ => {  }
     }
     count += 1;
   }
