@@ -511,8 +511,8 @@ fn eval(
         count += 2;
         let r1 = &mut functions as *mut HashMap<String, Box<dyn Fn(Vec<Box<dyn Any>>) -> dyn Any>>;
         let r2 = &mut variables as *mut HashMap<String, Box<dyn Any>>;
-        let value = unsafe { 
-          eval(vec![input.get(count).unwrap().clone()], Some(&mut input), read(r2), read(r1), 0); 
+        unsafe { 
+          eval(vec![input.get(count).unwrap().clone()], Some(&mut input), read(r2), read(r1), 0)
         };
         variables.insert(input.get(count - 1).unwrap().value.clone(), Box::new(input.get(count).unwrap().kind.clone()));
       },
