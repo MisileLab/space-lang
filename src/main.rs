@@ -1,3 +1,5 @@
+#![feature(let_else)]
+
 use std::{
   fs, 
   env, 
@@ -5,7 +7,7 @@ use std::{
   collections::HashMap,
   mem::discriminant,
   any::Any,
-  ptr::read
+  ptr::{read, addr_of}
 };
 
 #[derive(Debug)]
@@ -378,119 +380,6 @@ fn compile(mut compiler: Compiler, mut input: Vec<Token>, mut count: usize, vari
           }
         }
       },
-      TokenKind::FunctionCall(args) => {
-        let token = input.get(count).unwrap();
-        let function = compiler.functions.get(&token.value).expect("no function found");
-
-        if let TokenKind::Function{ name: _, args: arguments, scope, rettype } = &function.kind {
-          let scoper = if let TokenKind::Scope(scope) = scope.kind.clone() {
-            scope
-          } else {
-            panic!("No scope")
-          };
-          let mut realargs = HashMap::new();
-          if arguments.len() != args.len() { panic!("Arguments not equal") }
-          for (i, (i2, i3)) in args.iter().zip(arguments.iter()) {
-            match i3 {
-              &Value::Any => { },
-              &Value::Float => {
-                if discriminant(&i.kind) == discriminant(&TokenKind::Float(0.0)) {
-                  panic!("No return float")
-                }
-              },
-              &Value::Void => {
-                panic!("No void argument")
-              },
-              &Value::String => {
-                if discriminant(&i.kind) == discriminant(&TokenKind::String("".to_string())) {
-                  panic!("No return string")
-                }
-              },
-              &Value::Integer => {
-                if discriminant(&i.kind) == discriminant(&TokenKind::Integer(0)) {
-                  panic!("No return integer")
-                }
-              },
-              &Value::Boolean => {
-                if discriminant(&i.kind) == discriminant(&TokenKind::Boolean(false)) {
-                  panic!("No return boolean")
-                }
-              }
-            }
-            realargs.insert(i2.clone(), i.clone());
-          }
-          compile(compiler.clone(), scoper, 0, Some(realargs));
-          match rettype {
-            &Value::Any => { },
-            &Value::Float => {
-              if let TokenKind::Scope(a) = &scope.kind {
-                if discriminant(&a.iter().filter(
-                  |x| discriminant(&x.kind) == discriminant(&TokenKind::End(Box::new(Token::default()))) )
-                .next().unwrap().kind) == discriminant(&TokenKind::Float(0.0)) {
-                  panic!("No return float")
-                }
-              }
-            },
-            &Value::Void => {
-              panic!("No void argument")
-            },
-            &Value::String => {
-              if let TokenKind::Scope(a) = &scope.kind {
-                if discriminant(&a.iter().filter(
-                  |x| discriminant(&x.kind) == discriminant(&TokenKind::End(Box::new(Token::default()))) )
-                .next().unwrap().kind) == discriminant(&TokenKind::String("".to_string())) {
-                  panic!("No return string")
-                }
-              }
-            },
-            &Value::Integer => {
-              if let TokenKind::Scope(a) = &scope.kind {
-                if discriminant(&a.iter().filter(
-                  |x| discriminant(&x.kind) == discriminant(&TokenKind::End(Box::new(Token::default()))) )
-                .next().unwrap().kind) == discriminant(&TokenKind::Integer(0)) {
-                  panic!("No return int")
-                }
-              }
-            },
-            &Value::Boolean => {
-              if let TokenKind::Scope(a) = &scope.kind {
-                if discriminant(&a.iter().filter(
-                  |x| discriminant(&x.kind) == discriminant(&TokenKind::End(Box::new(Token::default()))) )
-                .next().unwrap().kind) == discriminant(&TokenKind::Boolean(true)) {
-                  panic!("No return bool")
-                }
-              }
-            }
-          }
-        }
-      },
-      TokenKind::VariableCall => {
-        input.insert(count, variables.iter().filter(|(x, _)| x == &&input.get(count).unwrap().value).next().unwrap().1.clone());
-        input.remove(count + 1);
-        count -= 1;
-      },
-      TokenKind::Condition(a) => {
-        if let TokenKind::Boolean(cond1) = input.get(count - 1).unwrap().kind {
-          count += 1;
-          if let TokenKind::Boolean(cond2) = compile(
-            compiler.clone(), 
-            vec![input.get(count).unwrap().clone()], 
-            0, 
-            Some(variables.clone())
-          ).iter().last().unwrap().clone().kind {
-            count -= 1;
-            input.remove(count - 1);
-            input.remove(count);
-            input.remove(count + 1);
-            input.insert(count, Token { kind: TokenKind::Boolean(match a {
-              Cond::Equal => { cond1 == cond2 },
-              Cond::And => { cond1 && cond2 },
-              Cond::NotEqual => { cond1 != cond2 },
-              Cond::Or => { cond1 || cond2 }
-            }), value: input.get(count).unwrap().value.clone() })
-          }
-        }
-      }
       _ => {  }
     }
     count += 1;
@@ -506,16 +395,31 @@ fn eval(
   mut count: usize
 ) {
   while input.get(count).is_some() {
-    match input.get(count).unwrap().kind {
+    match &input.get(count).unwrap().kind.clone() {
       TokenKind::Variable{mutable: _} => {
         count += 2;
-        let r1 = &mut functions as *mut HashMap<String, Box<dyn Fn(Vec<Box<dyn Any>>) -> dyn Any>>;
-        let r2 = &mut variables as *mut HashMap<String, Box<dyn Any>>;
+        let r1 = &mut variables as *mut HashMap<String, Box<dyn Any>>;
+        let r2 = &mut functions as *mut HashMap<String, Box<dyn Fn(Vec<Box<dyn Any>>) -> dyn Any>>;
         unsafe { 
-          eval(vec![input.get(count).unwrap().clone()], Some(&mut input), read(r2), read(r1), 0)
+          eval(vec![input.get(count).unwrap().clone()], Some(&mut input), read(r1), read(r2), 0)
         };
         variables.insert(input.get(count - 1).unwrap().value.clone(), Box::new(input.get(count).unwrap().kind.clone()));
       },
+      TokenKind::Condition(cond) => {
+        let r1 = &mut variables as *mut HashMap<String, Box<dyn Any>>;
+        let r2 = &mut functions as *mut HashMap<String, Box<dyn Fn(Vec<Box<dyn Any>>) -> dyn Any>>;
+        unsafe {
+          eval(vec![input.get(count + 1).unwrap().clone()], Some(&mut input), read(r1), read(r2), 0)
+        };
+        let TokenKind::Boolean(cond1) = &input[count - 1].kind else { panic!("No boolean") };
+        let TokenKind::Boolean(cond2) = &input[count + 1].kind else { panic!("No boolean") };
+        let boolean = match cond {
+          &Cond::And => { *cond1 && *cond2 },
+          &Cond::Equal => { *cond1 == *cond2 },
+          &Cond::NotEqual => { *cond1 != *cond2 },
+          &Cond::Or => { *cond1 || *cond2 }
+        };
+      }
       _ => todo!()
     }
   }
