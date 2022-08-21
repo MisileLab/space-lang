@@ -10,6 +10,8 @@ use std::{
   ptr::{read, addr_of}
 };
 
+use evcxr::EvalContext;
+
 #[derive(Debug)]
 pub struct Lexer { pub contents: Vec<char>, path: String }
 
@@ -49,6 +51,15 @@ enum Value {
   Void,
   Boolean,
   Any
+}
+
+enum RetTypeLOL {
+  Any(Box<dyn Any>),
+  Float(f64),
+  Integer(isize),
+  String(String),
+  Void,
+  Boolean(bool)
 }
 
 impl Default for TokenKind {
@@ -351,25 +362,25 @@ fn get_token_kind(tokens: &[Token]) -> TokenKind {
   tokens.last().unwrap_or(&Token::default()).kind.clone()
 }
 
-#[derive(Clone)]
-struct Compiler {
-  functions: HashMap<String, Token>
-}
-
-fn compile(mut compiler: Compiler, mut input: Vec<Token>, mut count: usize, variables: Option<HashMap<String, Token>>) -> Vec<Token>{
+fn check(mut input: Vec<Token>, mut count: usize, variables: Option<HashMap<String, Token>>) -> Vec<Token>{
   let mut variables = variables.unwrap_or_else(HashMap::new);
   while input.get(count).is_some() {
     match input.get(count).clone().unwrap().kind.clone() {
       TokenKind::Module { tokens, path: _ } => {
-        input.extend(tokens);
-      },
-      TokenKind::Function { name, args, scope, rettype: _ } => {
-        compiler.functions.insert(name.clone(), input.get(count).unwrap().clone());
+        let mut other = tokens.clone();
+        other.extend(input.clone());
+        input = other;
       },
       TokenKind::Variable {mutable} => {
         match input.get(count + 1).unwrap().kind {
           TokenKind::Identifier => {
-            if variables.contains_key(&input.get(count + 1).unwrap().value) && !mutable{
+            if variables.iter().filter(
+              |(x, y)| input.get(count + 1).unwrap().value == **x && if let TokenKind::Variable { mutable } = y.kind {
+                !mutable
+              } else {
+                false
+              }
+            ).next().is_some() {
               panic!("Unmutable variable but changed")
             } else {
               variables.insert(input.get(count + 1).unwrap().value.clone(), input.get(count).unwrap().clone());
@@ -391,15 +402,16 @@ fn eval(
   mut input: Vec<Token>, 
   parent: Option<&mut Vec<Token>>,
   mut variables: HashMap<String, Box<dyn Any>>, 
-  mut functions: HashMap<String, Box<dyn Fn(Vec<Box<dyn Any>>) -> dyn Any>>, 
+  mut functions: HashMap<String, (HashMap<String, Value>, Box<Token>, Value)>, 
   mut count: usize
 ) {
+  evcxr::runtime_hook();
   while input.get(count).is_some() {
     match &input.get(count).unwrap().kind.clone() {
       TokenKind::Variable{mutable: _} => {
         count += 2;
         let r1 = &mut variables as *mut HashMap<String, Box<dyn Any>>;
-        let r2 = &mut functions as *mut HashMap<String, Box<dyn Fn(Vec<Box<dyn Any>>) -> dyn Any>>;
+        let r2 = &mut functions as *mut HashMap<String, (HashMap<String, Value>, Box<Token>, Value)>;
         unsafe { 
           eval(vec![input.get(count).unwrap().clone()], Some(&mut input), read(r1), read(r2), 0)
         };
@@ -407,7 +419,7 @@ fn eval(
       },
       TokenKind::Condition(cond) => {
         let r1 = &mut variables as *mut HashMap<String, Box<dyn Any>>;
-        let r2 = &mut functions as *mut HashMap<String, Box<dyn Fn(Vec<Box<dyn Any>>) -> dyn Any>>;
+        let r2 = &mut functions as *mut HashMap<String, (HashMap<String, Value>, Box<Token>, Value)>;
         unsafe {
           eval(vec![input.get(count + 1).unwrap().clone()], Some(&mut input), read(r1), read(r2), 0)
         };
@@ -419,6 +431,34 @@ fn eval(
           &Cond::NotEqual => { *cond1 != *cond2 },
           &Cond::Or => { *cond1 || *cond2 }
         };
+        input.remove(count - 1);
+        input.remove(count);
+        input.remove(count + 1);
+        input.insert(count, Token { kind: TokenKind::Boolean(boolean), value: input.get(count).unwrap().value.clone() } )
+      },
+      TokenKind::Function{ name: _, args: _, scope: _, rettype: _ } => {
+        let TokenKind::Function{ name, args,scope, rettype } = input.get(count).unwrap().kind.clone() else { unreachable!() };
+        functions.insert(name.clone(), (args, scope, rettype));
+      },
+      TokenKind::FunctionCall(a) => {
+        match input.get(count).unwrap().value.clone().as_str() {
+          "eval_rust" => {
+            let (mut context, _) = EvalContext::new().unwrap();
+            context.eval("use std::any::Any;").unwrap();
+            context.eval(format!("let mut variables: HashMap<String, Box<dyn Any>> = {:?};", variables).as_str()).unwrap();
+            for i in a.iter() {
+              if let TokenKind::String(v) = &i.kind {
+                let c = context.eval(v);
+                println!("{:#?}", c);
+              } else {
+                panic!("No string")
+              }
+            }
+          },
+          _ => {
+
+          }
+        }
       }
       _ => todo!()
     }
