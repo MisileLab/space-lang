@@ -7,7 +7,7 @@ use std::{
   collections::HashMap,
   mem::discriminant,
   any::Any,
-  ptr::{read, addr_of}
+  ptr::read
 };
 
 use evcxr::EvalContext;
@@ -51,15 +51,6 @@ enum Value {
   Void,
   Boolean,
   Any
-}
-
-enum RetTypeLOL {
-  Any(Box<dyn Any>),
-  Float(f64),
-  Integer(isize),
-  String(String),
-  Void,
-  Boolean(bool)
 }
 
 impl Default for TokenKind {
@@ -227,7 +218,7 @@ impl Lexer {
                         "integer" => Value::Integer,
                         "float" => Value::Float,
                         "string" => Value::String,
-                        "void" => Value::Void,
+                        "void" => panic!("No void argument"),
                         "boolean" => Value::Boolean,
                         _ => panic!("SyntaxError {}", buffer.clone())
                       };
@@ -371,7 +362,7 @@ fn check(mut input: Vec<Token>, mut count: usize, variables: Option<HashMap<Stri
         other.extend(input.clone());
         input = other;
       },
-      TokenKind::Variable {mutable} => {
+      TokenKind::Variable {mutable: _} => {
         match input.get(count + 1).unwrap().kind {
           TokenKind::Identifier => {
             if variables.iter().filter(
@@ -404,22 +395,19 @@ fn eval(
   mut variables: HashMap<String, Box<dyn Any>>, 
   mut functions: HashMap<String, (HashMap<String, Value>, Box<Token>, Value)>, 
   mut count: usize
-) {
-  evcxr::runtime_hook();
+) -> Vec<Token> {
   while input.get(count).is_some() {
+    let r1 = &mut variables as *mut HashMap<String, Box<dyn Any>>;
+    let r2 = &mut functions as *mut HashMap<String, (HashMap<String, Value>, Box<Token>, Value)>;
     match &input.get(count).unwrap().kind.clone() {
       TokenKind::Variable{mutable: _} => {
         count += 2;
-        let r1 = &mut variables as *mut HashMap<String, Box<dyn Any>>;
-        let r2 = &mut functions as *mut HashMap<String, (HashMap<String, Value>, Box<Token>, Value)>;
         unsafe { 
           eval(vec![input.get(count).unwrap().clone()], Some(&mut input), read(r1), read(r2), 0)
         };
         variables.insert(input.get(count - 1).unwrap().value.clone(), Box::new(input.get(count).unwrap().kind.clone()));
       },
       TokenKind::Condition(cond) => {
-        let r1 = &mut variables as *mut HashMap<String, Box<dyn Any>>;
-        let r2 = &mut functions as *mut HashMap<String, (HashMap<String, Value>, Box<Token>, Value)>;
         unsafe {
           eval(vec![input.get(count + 1).unwrap().clone()], Some(&mut input), read(r1), read(r2), 0)
         };
@@ -455,14 +443,56 @@ fn eval(
               }
             }
           },
+          "drop" => {
+            variables.remove(&a[0].value);
+          },
+          "add_variable" => {
+            variables.insert(a[0].value.clone(), Box::new(a[1].clone()));
+          },
           _ => {
-
+            if functions.contains_key(&input[0].value) {
+              let function = functions.get(&input[0].value).unwrap();
+              let mut variables = HashMap::new();
+              for (i, (k, _ )) in function.0.iter().enumerate() {
+                variables.insert(k, a[i].clone());
+              }
+              count += 1;
+              let TokenKind::Scope(scope) = input[count].kind.clone() else { panic!("No scope") };
+              unsafe {
+                if let TokenKind::End(end) = eval(
+                  scope, 
+                  None, 
+                  read(r1), 
+                  read(r2), 
+                  0
+                ).iter().last().unwrap().clone().kind {
+                  input.remove(count);
+                  count -= 1;
+                  input.remove(count);
+                  if (function.2 == Value::Any || (function.2 == Value::Boolean && discriminant(&end.kind) == discriminant(&TokenKind::Boolean(true)))) || 
+                    (function.2 == Value::Float && (discriminant(&end.kind) == discriminant(&TokenKind::Float(0.)))) ||
+                    (function.2 == Value::Integer && (discriminant(&end.kind) == discriminant(&TokenKind::Integer(0)))) ||
+                    (function.2 == Value::String && (discriminant(&end.kind) == discriminant(&TokenKind::String("".to_string())))) || function.2 != Value::Void {
+                    input.insert(count, *end)
+                  } else {
+                    panic!("No equal return type")
+                  }
+                } else { 
+                  if function.2 != Value::Void || function.2 != Value::Any {
+                    panic!("No end but function return type not void")
+                  }
+                };
+              }
+            } else {
+              panic!("No function found")
+            }
           }
         }
       }
       _ => todo!()
     }
   }
+  input
 }
 
 fn get_modules(input: &[Token], modules: &mut Vec<Token>) {
@@ -487,6 +517,7 @@ fn remove_first_and_last(value: String) -> String {
 
 #[allow(clippy::expect_fun_call)]
 fn main() {
+  evcxr::runtime_hook();
   let file = env::args().nth(1).unwrap();
   let release = true;
   let path = Path::new(&file).parent().unwrap().to_str().unwrap().to_string();
