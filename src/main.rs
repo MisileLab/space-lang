@@ -519,12 +519,11 @@ fn remove_first_and_last(value: String) -> String {
 fn main() {
   evcxr::runtime_hook();
   let file = env::args().nth(1).unwrap();
-  let release = true;
   let path = Path::new(&file).parent().unwrap().to_str().unwrap().to_string();
   let contents = fs::read_to_string(&file).expect(&format!("Couldn't read this file, result is {}", file));
 
   let mut lexer = Lexer::new(contents, path);
-  let contextlol = lexer.lex(0, lexer.contents.len(), None);
+  let contextlol = check(lexer.lex(0, lexer.contents.len(), None), 0, None);
   let mut modules: Vec<Token> = Vec::new();
   println!("{:#?}", &contextlol);
   get_modules(&contextlol, &mut modules);
