@@ -5,12 +5,8 @@ use std::{
   env, 
   path::Path,
   collections::HashMap,
-  mem::discriminant,
-  any::Any,
-  ptr::read
+  mem::discriminant
 };
-
-use evcxr::EvalContext;
 
 #[derive(Debug)]
 pub struct Lexer { pub contents: Vec<char>, path: String }
@@ -25,7 +21,7 @@ enum TokenKind {
   FunctionCall(Vec<Token>),
   Scope(Vec<Token>),
   String(String),
-  End(Box<Token>),
+  End(String),
   Assign,
   Variable{ mutable: bool },
   Identifier,
@@ -51,6 +47,10 @@ enum Value {
   Void,
   Boolean,
   Any
+}
+
+enum Languages {
+  Kotlin
 }
 
 impl Default for TokenKind {
@@ -184,12 +184,7 @@ impl Lexer {
                 count += 1;
               }
 
-              println!("{:#?}", &argname);
-
-              Some(TokenKind::End(Box::new(Token { 
-                kind: TokenKind::End(Box::new(self.lex(count - argname.len(), count, Some(
-                  tokens.clone().into_iter().filter(|x| x.kind == TokenKind::Identifier).collect::<Vec<Token>>()
-                )).into_iter().last().unwrap())), value: buffer.clone()})))
+              Some(TokenKind::End(argname))
             },
             "fun" => {
               buffer.clear();
@@ -353,15 +348,10 @@ fn get_token_kind(tokens: &[Token]) -> TokenKind {
   tokens.last().unwrap_or(&Token::default()).kind.clone()
 }
 
-fn check(mut input: Vec<Token>, mut count: usize, variables: Option<HashMap<String, Token>>) -> Vec<Token>{
+fn check(input: Vec<Token>, mut count: usize, variables: Option<HashMap<String, Token>>) -> Vec<Token>{
   let mut variables = variables.unwrap_or_else(HashMap::new);
   while input.get(count).is_some() {
     match input.get(count).clone().unwrap().kind.clone() {
-      TokenKind::Module { tokens, path: _ } => {
-        let mut other = tokens.clone();
-        other.extend(input.clone());
-        input = other;
-      },
       TokenKind::Variable {mutable: _} => {
         match input.get(count + 1).unwrap().kind {
           TokenKind::Identifier => {
@@ -389,122 +379,42 @@ fn check(mut input: Vec<Token>, mut count: usize, variables: Option<HashMap<Stri
   input
 }
 
-fn eval(
-  mut input: Vec<Token>, 
-  parent: Option<&mut Vec<Token>>,
-  mut variables: HashMap<String, Box<dyn Any>>, 
-  mut functions: HashMap<String, (HashMap<String, Value>, Box<Token>, Value)>, 
-  mut count: usize
-) -> Vec<Token> {
+fn transcompile(
+  lang: Languages,
+  mut input: Vec<Token>
+) -> String {
+  match lang {
+    Languages::Kotlin => transcompile_kotlin(input, 0)
+  }
+}
+
+fn transcompile_kotlin(mut input: Vec<Token>, mut count: usize) -> String {
+  let mut buffer = String::new();
   while input.get(count).is_some() {
-    let r1 = &mut variables as *mut HashMap<String, Box<dyn Any>>;
-    let r2 = &mut functions as *mut HashMap<String, (HashMap<String, Value>, Box<Token>, Value)>;
     match &input.get(count).unwrap().kind.clone() {
-      TokenKind::Variable{mutable: _} => {
-        count += 2;
-        unsafe { 
-          eval(vec![input.get(count).unwrap().clone()], Some(&mut input), read(r1), read(r2), 0)
-        };
-        variables.insert(input.get(count - 1).unwrap().value.clone(), Box::new(input.get(count).unwrap().kind.clone()));
+      TokenKind::Assign => { buffer.push('=') },
+      TokenKind::Boolean(b) => { 
+        if *b {
+          buffer.push_str("true\n")
+        } else {
+          buffer.push_str("false\n")
+        }
       },
-      TokenKind::Condition(cond) => {
-        unsafe {
-          eval(vec![input.get(count + 1).unwrap().clone()], Some(&mut input), read(r1), read(r2), 0)
-        };
-        let TokenKind::Boolean(cond1) = &input[count - 1].kind else { panic!("No boolean") };
-        let TokenKind::Boolean(cond2) = &input[count + 1].kind else { panic!("No boolean") };
-        let boolean = match cond {
-          &Cond::And => { *cond1 && *cond2 },
-          &Cond::Equal => { *cond1 == *cond2 },
-          &Cond::NotEqual => { *cond1 != *cond2 },
-          &Cond::Or => { *cond1 || *cond2 }
-        };
-        input.remove(count - 1);
-        input.remove(count);
-        input.remove(count + 1);
-        input.insert(count, Token { kind: TokenKind::Boolean(boolean), value: input.get(count).unwrap().value.clone() } )
-      },
-      TokenKind::Function{ name: _, args: _, scope: _, rettype: _ } => {
-        let TokenKind::Function{ name, args,scope, rettype } = input.get(count).unwrap().kind.clone() else { unreachable!() };
-        functions.insert(name.clone(), (args, scope, rettype));
-      },
-      TokenKind::FunctionCall(a) => {
-        match input.get(count).unwrap().value.clone().as_str() {
-          "eval_rust" => {
-            let (mut context, _) = EvalContext::new().unwrap();
-            context.eval("use std::any::Any;").unwrap();
-            context.eval(format!("let mut variables: HashMap<String, Box<dyn Any>> = {:?};", variables).as_str()).unwrap();
-            for i in a.iter() {
-              if let TokenKind::String(v) = &i.kind {
-                let c = context.eval(v);
-                println!("{:#?}", c);
-              } else {
-                panic!("No string")
-              }
-            }
-          },
-          "drop" => {
-            variables.remove(&a[0].value);
-          },
-          "add_variable" => {
-            variables.insert(a[0].value.clone(), Box::new(a[1].clone()));
-          },
-          _ => {
-            if functions.contains_key(&input[0].value) {
-              let function = functions.get(&input[0].value).unwrap();
-              let mut variables = HashMap::new();
-              for (i, (k, _ )) in function.0.iter().enumerate() {
-                variables.insert(k, a[i].clone());
-              }
-              count += 1;
-              let TokenKind::Scope(scope) = input[count].kind.clone() else { panic!("No scope") };
-              unsafe {
-                if let TokenKind::End(end) = eval(
-                  scope, 
-                  None, 
-                  read(r1), 
-                  read(r2), 
-                  0
-                ).iter().last().unwrap().clone().kind {
-                  input.remove(count);
-                  count -= 1;
-                  input.remove(count);
-                  if (function.2 == Value::Any || (function.2 == Value::Boolean && discriminant(&end.kind) == discriminant(&TokenKind::Boolean(true)))) || 
-                    (function.2 == Value::Float && (discriminant(&end.kind) == discriminant(&TokenKind::Float(0.)))) ||
-                    (function.2 == Value::Integer && (discriminant(&end.kind) == discriminant(&TokenKind::Integer(0)))) ||
-                    (function.2 == Value::String && (discriminant(&end.kind) == discriminant(&TokenKind::String("".to_string())))) || function.2 != Value::Void {
-                    input.insert(count, *end)
-                  } else {
-                    panic!("No equal return type")
-                  }
-                } else { 
-                  if function.2 != Value::Void || function.2 != Value::Any {
-                    panic!("No end but function return type not void")
-                  }
-                };
-              }
-            } else {
-              panic!("No function found")
-            }
-          }
+      TokenKind::Condition(a) => {
+        match a {
+          &Cond::And => { buffer.push_str("&&") },
+          &Cond::Equal => { buffer.push_str("==") },
+          &Cond::NotEqual => { buffer.push_str("!=") },
+          &Cond::Or => { buffer.push_str("||") }
+          _ => todo!()
         }
       }
       _ => todo!()
     }
   }
-  input
+  buffer
 }
 
-fn get_modules(input: &[Token], modules: &mut Vec<Token>) {
-  for i in input.iter() {
-    if let TokenKind::Module { tokens, path: _} = &i.kind {
-      if modules.iter().find(|x| x == &i).is_none() {
-        modules.push(i.clone());
-        get_modules(tokens, modules);
-      }
-    }
-  }
-}
 
 fn remove_first_and_last(value: String) -> String {
   let mut chars = value.chars();
@@ -517,24 +427,11 @@ fn remove_first_and_last(value: String) -> String {
 
 #[allow(clippy::expect_fun_call)]
 fn main() {
-  evcxr::runtime_hook();
   let file = env::args().nth(1).unwrap();
   let path = Path::new(&file).parent().unwrap().to_str().unwrap().to_string();
   let contents = fs::read_to_string(&file).expect(&format!("Couldn't read this file, result is {}", file));
 
   let mut lexer = Lexer::new(contents, path);
   let contextlol = check(lexer.lex(0, lexer.contents.len(), None), 0, None);
-  let mut modules: Vec<Token> = Vec::new();
   println!("{:#?}", &contextlol);
-  get_modules(&contextlol, &mut modules);
-
-  let main_func = contextlol.iter().find(|x| { 
-    if let TokenKind::Function {name, args: _, scope: _, rettype: _} = &x.kind {
-      name == "main"
-    } else {
-      false
-    }
-  }).unwrap();
-
-  println!("{:#?}", main_func);
 }
