@@ -18,8 +18,8 @@ Julia - 1.4
 
 ## Roadmap
 1.0 - Initial Release (Implemented Kotlin)  
-1.1~1.5 - Language Implementation and Cleanup code  
-1.6~1.9 - Some optimization and bug fix  
+``1.1~1.5`` - Language Implementation and Cleanup code  
+``1.6~1.9`` - Some optimization and bug fix  
 2.0 - **Transcompile from other language to space language** (that means you can use Python code in Rust! (without Intepreter or cargo module))
 
 ## Requirements
