@@ -17,12 +17,7 @@ fun main(f: integer, i: float) return float {
 
     mut a = 3.12 // this is mutable variable
     unmut b = 3 // this is unmutable variable
-
-    // this is scope
-    {
-        // you can't use the variable out of scope.
-        unmut a = 4 // this is unmutable, value 4 (not 3)
-    }
+    
     print(a)
     end a
 }

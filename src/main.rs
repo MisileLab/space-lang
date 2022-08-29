@@ -8,25 +8,30 @@ use std::{
   mem::discriminant
 };
 
+use tokio::{fs::File, io::AsyncWriteExt};
+
 #[derive(Debug)]
 pub struct Lexer { pub contents: Vec<char>, path: String }
 
 #[derive(Debug, PartialEq, Clone)]
 enum TokenKind {
   None,
+  Newline,
+  List,
+  Dict,
   Boolean(bool),
   VariableCall,
   Module{ tokens: Vec<Token>, path: String },
   Function{ name: String, args: HashMap<String, Value>, scope: Box<Token>, rettype: Value },
-  FunctionCall(Vec<Token>),
+  FunctionCall(Vec<String>),
   Scope(Vec<Token>),
   String(String),
   End(String),
   Assign,
   Variable{ mutable: bool },
   Identifier,
-  Integer(isize),
-  Float(f64),
+  Integer(String),
+  Float(String),
   If,
   Condition(Cond)
 }
@@ -46,6 +51,8 @@ enum Value {
   String,
   Void,
   Boolean,
+  List,
+  Dict,
   Any
 }
 
@@ -215,6 +222,8 @@ impl Lexer {
                         "string" => Value::String,
                         "void" => panic!("No void argument"),
                         "boolean" => Value::Boolean,
+                        "list" => Value::List,
+                        "dict" => Value::Dict,
                         _ => panic!("SyntaxError {}", buffer.clone())
                       };
 
@@ -271,6 +280,8 @@ impl Lexer {
                   "string" => Value::String,
                   "void" => Value::Void,
                   "any" => Value::Any,
+                  "list" => Value::List,
+                  "dict" => Value::Dict,
                   _ => panic!("SyntaxError {}", buffer.clone())
                 }
               })
@@ -280,6 +291,8 @@ impl Lexer {
             "or" => Some(TokenKind::Condition(Cond::Or)),
             "true" => Some(TokenKind::Boolean(true)),
             "false" => Some(TokenKind::Boolean(false)),
+            "list" => Some(TokenKind::List),
+            "dict" => Some(TokenKind::Dict),
             "import" => {
               let mut file = String::new();
               while self.current_char(count).is_alphabetic() || ((self.current_char(count) == '/' || self.current_char(count) == '.') && self.current_char(count + 1).is_alphabetic()) || self.current_char(count) == ' ' {
@@ -299,18 +312,27 @@ impl Lexer {
               } else if self.current_char_no_space(count) == '(' {
                 count += 1;
                 let mut buffer2 = String::new();
+                let kind = tokens.iter().last().unwrap().kind.clone();
+                if kind != TokenKind::Newline && (
+                  kind != TokenKind::Assign && discriminant(&kind) != discriminant(&TokenKind::Condition(Cond::Equal)) && 
+                  discriminant(&kind) != discriminant(&TokenKind::End("".to_string())) && kind != TokenKind::Identifier &&
+                  kind != TokenKind::If && discriminant(&kind) != discriminant(&TokenKind::Module{tokens: Vec::new(), path: "".to_string()}) &&
+                  kind != TokenKind::None
+                ) {
+                  buffer2.push_str((tokens.iter().last().unwrap().value.clone() + ".").as_str());
+                }
                 let mut args = Vec::new();
                 while self.current_char(count) != ')' {
                   if self.current_char(count + 1) == ')' { buffer2.push(self.current_char(count)); }
                   if self.current_char(count) == ',' || self.current_char(count + 1) == ')' {
                     if buffer2.chars().last().unwrap() == '\"' && buffer2.chars().next().unwrap() == '\"' {
-                      args.push(Token { kind: TokenKind::String(remove_first_and_last(buffer2.clone())), value: buffer2.clone() });
+                      args.push(buffer2.clone());
                       buffer2.clear();
                     } else if buffer2.chars().find(|x| !x.is_numeric()).is_none() && buffer2.chars().find(|x| x == &'.').is_some() {
-                      args.push(Token { kind: TokenKind::Float(buffer2.clone().parse().unwrap()), value: buffer2.clone() });
+                      args.push(buffer2.clone());
                       buffer2.clear();
                     } else if buffer2.chars().find(|x| !x.is_numeric()).is_none() {
-                      args.push(Token { kind: TokenKind::Integer(buffer2.clone().parse().unwrap()), value: buffer2.clone() });
+                      args.push(buffer2.clone());
                       buffer2.clear();
                     }
                   } else {
@@ -325,6 +347,7 @@ impl Lexer {
           
           if let Some(k) = kind { 
             tokens.push(Token { kind: k, value: buffer }); 
+            tokens.push(Token { kind: TokenKind::Newline, value: "\n".to_string() });
           }
         },
         _ => {
@@ -348,90 +371,117 @@ fn get_token_kind(tokens: &[Token]) -> TokenKind {
   tokens.last().unwrap_or(&Token::default()).kind.clone()
 }
 
-fn check(input: Vec<Token>, mut count: usize, variables: Option<HashMap<String, Token>>) -> Vec<Token>{
-  let mut variables = variables.unwrap_or_else(HashMap::new);
-  while input.get(count).is_some() {
-    match input.get(count).clone().unwrap().kind.clone() {
-      TokenKind::Variable {mutable: _} => {
-        match input.get(count + 1).unwrap().kind {
-          TokenKind::Identifier => {
-            if variables.iter().filter(
-              |(x, y)| input.get(count + 1).unwrap().value == **x && if let TokenKind::Variable { mutable } = y.kind {
-                !mutable
-              } else {
-                false
-              }
-            ).next().is_some() {
-              panic!("Unmutable variable but changed")
-            } else {
-              variables.insert(input.get(count + 1).unwrap().value.clone(), input.get(count).unwrap().clone());
-            }
-          },
-          _ => {
-            panic!("CompileError but like SyntaxError")
-          }
-        }
-      },
-      _ => {  }
+fn value_to_string(value: Value, languages: Languages) -> String {
+  match languages {
+    Languages::Kotlin => {
+      match value {
+        Value::Any => { "Any?" },
+        Value::Integer => { "Int" },
+        Value::Boolean => { "Boolean" },
+        Value::Float => { "Float" },
+        Value::Void => { "()" },
+        Value::Dict => { "Map<Any?, Any?>" },
+        Value::List => { "List<Any?>" },
+        Value::String => { "String" }
+      }.to_string()
     }
-    count += 1;
   }
-  input
 }
 
 fn transcompile(
   lang: Languages,
-  mut input: Vec<Token>
+  input: Vec<Token>
 ) -> String {
   match lang {
-    Languages::Kotlin => transcompile_kotlin(input, 0)
+    Languages::Kotlin => transcompile_kotlin(input, 0, 0)
   }
 }
 
-fn transcompile_kotlin(mut input: Vec<Token>, mut count: usize) -> String {
+fn transcompile_kotlin(input: Vec<Token>, mut count: usize, ident: usize) -> String {
   let mut buffer = String::new();
   while input.get(count).is_some() {
-    match &input.get(count).unwrap().kind.clone() {
+    if count != 0 {
+      if ident != 0 && input.get(count - 1).unwrap().kind == TokenKind::Newline {
+        buffer.push_str("  ".repeat(ident).as_str());
+      }
+    }
+    match &mut input.get(count).unwrap().kind.clone() {
       TokenKind::Assign => { buffer.push('=') },
       TokenKind::Boolean(b) => { 
         if *b {
-          buffer.push_str("true\n")
+          buffer.push_str("true")
         } else {
-          buffer.push_str("false\n")
+          buffer.push_str("false")
         }
       },
       TokenKind::Condition(a) => {
         match a {
-          &Cond::And => { buffer.push_str("&&") },
-          &Cond::Equal => { buffer.push_str("==") },
-          &Cond::NotEqual => { buffer.push_str("!=") },
-          &Cond::Or => { buffer.push_str("||") }
-          _ => todo!()
+          &mut Cond::And => { buffer.push_str("&&") },
+          &mut Cond::Equal => { buffer.push_str("==") },
+          &mut Cond::NotEqual => { buffer.push_str("!=") },
+          &mut Cond::Or => { buffer.push_str("||") }
         }
+      },
+      TokenKind::End(v) => {
+        buffer.push_str(format!("return {}", v).as_str());
+      },
+      TokenKind::Float(f) => {
+        buffer.push_str(f);
+      },
+      TokenKind::Integer(f) => {
+        buffer.push_str(f);
       }
+      TokenKind::Function{name, args, scope, rettype} => {
+        if let TokenKind::Scope(a) = &mut scope.kind {
+          a.insert(0, Token { kind: TokenKind::Newline, value: "\n".to_string() });
+        }
+        let mut arguments = String::new();
+        let TokenKind::Scope(a) = &scope.kind else { unreachable!() };
+        let mut b: Option<Vec<Token>> = None; 
+        for c in a.iter() {
+          if let TokenKind::Scope(e) = &c.kind {
+            b = Some(e.clone())
+          }
+        }
+        drop(a);
+        let len = args.len() - 1;
+        for (i, (k, v)) in args.iter().enumerate() {
+          arguments.push_str(format!("{}: {}", k, value_to_string(v.clone(), Languages::Kotlin)).as_str());
+          if i != len {
+            arguments.push_str(", ")
+          }
+        }
+        drop(len);
+        buffer.push_str(format!("fun {}({}): {}", name, arguments, value_to_string(rettype.clone(), Languages::Kotlin)).as_str());
+        buffer.push_str("{\n  ");
+        buffer.push_str(&transcompile_kotlin(b.clone().unwrap(), 0, ident + 1));
+        buffer.push_str("}")
+      },
+      TokenKind::Newline => {
+        buffer.push('\n');
+      },
       _ => todo!()
     }
+    count += 1;
   }
   buffer
 }
 
-
-fn remove_first_and_last(value: String) -> String {
-  let mut chars = value.chars();
-  let mut buffer = String::new();
-  chars.next();
-  chars.next_back();
-  chars.into_iter().for_each(|x| buffer.push(x));
-  buffer
-}
-
 #[allow(clippy::expect_fun_call)]
-fn main() {
+#[tokio::main]
+async fn main() {
   let file = env::args().nth(1).unwrap();
   let path = Path::new(&file).parent().unwrap().to_str().unwrap().to_string();
   let contents = fs::read_to_string(&file).expect(&format!("Couldn't read this file, result is {}", file));
 
   let mut lexer = Lexer::new(contents, path);
-  let contextlol = check(lexer.lex(0, lexer.contents.len(), None), 0, None);
-  println!("{:#?}", &contextlol);
+  let contextlol = transcompile(Languages::Kotlin, lexer.lex(0, lexer.contents.len(), None));
+
+  let b = file.replace(".space", ".kt");
+  let ex = Path::new(&b);
+  let mut c = File::create(ex).await.unwrap();
+
+  c.write_all(contextlol.as_bytes()).await.unwrap();
+
+  println!("Ready!");
 }
