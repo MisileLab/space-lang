@@ -23,7 +23,7 @@ enum TokenKind {
   VariableCall,
   Module{ tokens: Vec<Token>, path: String },
   Function{ name: String, args: HashMap<String, Value>, scope: Box<Token>, rettype: Value },
-  FunctionCall(Vec<String>),
+  FunctionCall(String),
   Scope(Vec<Token>),
   String(String),
   End(String),
@@ -312,32 +312,20 @@ impl Lexer {
               } else if self.current_char_no_space(count) == '(' {
                 count += 1;
                 let mut buffer2 = String::new();
-                let kind = tokens.iter().last().unwrap().kind.clone();
-                if kind != TokenKind::Newline && (
-                  kind != TokenKind::Assign && discriminant(&kind) != discriminant(&TokenKind::Condition(Cond::Equal)) && 
-                  discriminant(&kind) != discriminant(&TokenKind::End("".to_string())) && kind != TokenKind::Identifier &&
-                  kind != TokenKind::If && discriminant(&kind) != discriminant(&TokenKind::Module{tokens: Vec::new(), path: "".to_string()}) &&
-                  kind != TokenKind::None
-                ) {
-                  buffer2.push_str((tokens.iter().last().unwrap().value.clone() + ".").as_str());
-                }
-                let mut args = Vec::new();
-                while self.current_char(count) != ')' {
-                  if self.current_char(count + 1) == ')' { buffer2.push(self.current_char(count)); }
-                  if self.current_char(count) == ',' || self.current_char(count + 1) == ')' {
-                    if buffer2.chars().last().unwrap() == '\"' && buffer2.chars().next().unwrap() == '\"' {
-                      args.push(buffer2.clone());
-                      buffer2.clear();
-                    } else if buffer2.chars().find(|x| !x.is_numeric()).is_none() && buffer2.chars().find(|x| x == &'.').is_some() {
-                      args.push(buffer2.clone());
-                      buffer2.clear();
-                    } else if buffer2.chars().find(|x| !x.is_numeric()).is_none() {
-                      args.push(buffer2.clone());
-                      buffer2.clear();
-                    }
-                  } else {
-                    buffer2.push(self.current_char(count));
+                if tokens.iter().last().clone().is_some() {
+                  let kind = tokens.iter().last().unwrap().kind.clone();
+                  if kind != TokenKind::Newline && (
+                    kind != TokenKind::Assign && discriminant(&kind) != discriminant(&TokenKind::Condition(Cond::Equal)) && 
+                    discriminant(&kind) != discriminant(&TokenKind::End("".to_string())) && kind != TokenKind::Identifier &&
+                    kind != TokenKind::If && discriminant(&kind) != discriminant(&TokenKind::Module{tokens: Vec::new(), path: "".to_string()}) &&
+                    kind != TokenKind::None
+                  ) {
+                    buffer2.push_str((tokens.iter().last().unwrap().value.clone() + ".").as_str());
                   }
+                }
+                let mut args = String::new();
+                while self.current_char(count) != ')' {
+                  args.push(self.current_char(count));
                   count += 1;
                 }
                 Some(TokenKind::FunctionCall(args))
@@ -379,7 +367,7 @@ fn value_to_string(value: Value, languages: Languages) -> String {
         Value::Integer => { "Int" },
         Value::Boolean => { "Boolean" },
         Value::Float => { "Float" },
-        Value::Void => { "()" },
+        Value::Void => { "Unit" },
         Value::Dict => { "Map<Any?, Any?>" },
         Value::List => { "List<Any?>" },
         Value::String => { "String" }
@@ -430,7 +418,7 @@ fn transcompile_kotlin(input: Vec<Token>, mut count: usize, ident: usize) -> Str
       },
       TokenKind::Integer(f) => {
         buffer.push_str(f);
-      }
+      },
       TokenKind::Function{name, args, scope, rettype} => {
         if let TokenKind::Scope(a) = &mut scope.kind {
           a.insert(0, Token { kind: TokenKind::Newline, value: "\n".to_string() });
@@ -444,7 +432,7 @@ fn transcompile_kotlin(input: Vec<Token>, mut count: usize, ident: usize) -> Str
           }
         }
         drop(a);
-        let len = args.len() - 1;
+        let len = if args.len() == 0 { 0 } else { args.len() - 1 };
         for (i, (k, v)) in args.iter().enumerate() {
           arguments.push_str(format!("{}: {}", k, value_to_string(v.clone(), Languages::Kotlin)).as_str());
           if i != len {
@@ -460,6 +448,9 @@ fn transcompile_kotlin(input: Vec<Token>, mut count: usize, ident: usize) -> Str
       TokenKind::Newline => {
         buffer.push('\n');
       },
+      TokenKind::FunctionCall(a) => {
+        buffer.push_str(format!("{}({})", &input.get(count).unwrap().value, a).as_str())
+      }
       _ => todo!()
     }
     count += 1;
