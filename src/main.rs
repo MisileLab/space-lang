@@ -96,8 +96,12 @@ impl Lexer {
             panic!("SyntaxError");
           }
         },
+        '\n' => {
+          tokens.push( Token { kind: TokenKind::Newline, value: "\n".to_string() } );
+          count += 1;
+        },
         '=' => {
-          if discriminant(&get_token_kind(&tokens)) == discriminant(&TokenKind::Variable { mutable: false }) {
+          if get_token_kind(&tokens) == TokenKind::Identifier {
             tokens.push( Token { kind: TokenKind::Assign, value: "=".to_string() } );
             count += 1;
           } else {
@@ -335,7 +339,6 @@ impl Lexer {
           
           if let Some(k) = kind { 
             tokens.push(Token { kind: k, value: buffer }); 
-            tokens.push(Token { kind: TokenKind::Newline, value: "\n".to_string() });
           }
         },
         _ => {
@@ -394,7 +397,7 @@ fn transcompile_kotlin(input: Vec<Token>, mut count: usize, ident: usize) -> Str
       }
     }
     match &mut input.get(count).unwrap().kind.clone() {
-      TokenKind::Assign => { buffer.push('=') },
+      TokenKind::Assign => { buffer.push_str(" = ") },
       TokenKind::Boolean(b) => { 
         if *b {
           buffer.push_str("true")
@@ -441,7 +444,7 @@ fn transcompile_kotlin(input: Vec<Token>, mut count: usize, ident: usize) -> Str
         }
         drop(len);
         buffer.push_str(format!("fun {}({}): {}", name, arguments, value_to_string(rettype.clone(), Languages::Kotlin)).as_str());
-        buffer.push_str("{\n  ");
+        buffer.push_str("{  ");
         buffer.push_str(&transcompile_kotlin(b.clone().unwrap(), 0, ident + 1));
         buffer.push_str("}")
       },
@@ -450,6 +453,20 @@ fn transcompile_kotlin(input: Vec<Token>, mut count: usize, ident: usize) -> Str
       },
       TokenKind::FunctionCall(a) => {
         buffer.push_str(format!("{}({})", &input.get(count).unwrap().value, a).as_str())
+      },
+      TokenKind::Variable{mutable} => {
+        if *mutable {
+          buffer.push_str("var")
+        } else {
+          buffer.push_str("val")
+        }
+      },
+      TokenKind::Identifier => {
+        buffer.push_str(" ");
+        buffer.push_str(&input.get(count).unwrap().value);
+      },
+      TokenKind::VariableCall => {
+        buffer.push_str(&input.get(count).unwrap().value);
       }
       _ => todo!()
     }
@@ -466,6 +483,7 @@ async fn main() {
   let contents = fs::read_to_string(&file).expect(&format!("Couldn't read this file, result is {}", file));
 
   let mut lexer = Lexer::new(contents, path);
+  println!("{:#?}", lexer.lex(0, lexer.contents.len(), None));
   let contextlol = transcompile(Languages::Kotlin, lexer.lex(0, lexer.contents.len(), None));
 
   let b = file.replace(".space", ".kt");
