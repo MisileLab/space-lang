@@ -95,7 +95,7 @@ impl Lexer {
   }
   pub fn lex(&mut self, mut count: usize, limit: usize, variables: Option<Vec<Token>>) -> Vec<Token> {
     let mut tokens: Vec<Token> = Vec::new();
-    for i in variables.clone().unwrap_or(Vec::new()).into_iter() {
+    for i in variables.clone().unwrap_or_default().into_iter() {
       tokens.push(i)
     }
 
@@ -327,7 +327,7 @@ impl Lexer {
                 count += 1;
               }
               let path = Path::new(&format!("{}/{}", self.path, &file)).to_str().unwrap().to_string();
-              let contents = fs::read_to_string(&path).expect(&format!("Couldn't read this file, result is {}", file));
+              let contents = fs::read_to_string(&path).unwrap_or_else(|_| panic!("Couldn't read this file, result is {}", file));
               Some(TokenKind::Module{tokens: Lexer::new(contents.clone(), self.path.clone()).lex(0, contents.len(), None), path})
             }
             a if tokens.clone().into_iter().any(|x| (x.kind == TokenKind::Identifier && x.value == a)) => {
@@ -417,10 +417,8 @@ fn transcompile_kotlin(input: Vec<Token>, mut count: usize, ident: usize) -> Str
   let mut buffer = String::new();
   println!("asd: {:#?}", input);
   while input.get(count).is_some() {
-    if count != 0 {
-      if ident != 0 && input.get(count - 1).unwrap().kind == TokenKind::Newline {
-        buffer.push_str("  ".repeat(ident).as_str());
-      }
+    if count != 0 && ident != 0 && input.get(count - 1).unwrap().kind == TokenKind::Newline {
+      buffer.push_str("  ".repeat(ident).as_str());
     }
     if cfg!(debug_assertions) {
       println!("{}: {:#?}", count, input.get(count).unwrap().clone());
@@ -435,11 +433,11 @@ fn transcompile_kotlin(input: Vec<Token>, mut count: usize, ident: usize) -> Str
         }
       },
       TokenKind::Condition(a) => {
-        match a {
-          &mut Cond::And => { buffer.push_str("&&") },
-          &mut Cond::Equal => { buffer.push_str("==") },
-          &mut Cond::NotEqual => { buffer.push_str("!=") },
-          &mut Cond::Or => { buffer.push_str("||") }
+        match *a {
+          Cond::And => { buffer.push_str("&&") },
+          Cond::Equal => { buffer.push_str("==") },
+          Cond::NotEqual => { buffer.push_str("!=") },
+          Cond::Or => { buffer.push_str("||") }
         }
       },
       TokenKind::End(v) => {
@@ -454,7 +452,7 @@ fn transcompile_kotlin(input: Vec<Token>, mut count: usize, ident: usize) -> Str
       TokenKind::Function{name, args, scope, rettype} => {
         let mut arguments = String::new();
         let TokenKind::Scope(a) = &scope.kind else { unreachable!() };
-        let len = if args.len() == 0 { 0 } else { args.len() - 1 };
+        let len = if args.is_empty() { 0 } else { args.len() - 1 };
         for (i, (k, v)) in args.iter().enumerate() {
           arguments.push_str(format!("{}: {}", k, value_to_string(v.clone(), Languages::Kotlin)).as_str());
           if i != len {
@@ -462,11 +460,10 @@ fn transcompile_kotlin(input: Vec<Token>, mut count: usize, ident: usize) -> Str
           }
         }
         println!("{}", transcompile_kotlin(a.clone(), 0, ident + 1));
-        drop(len);
         buffer.push_str(format!("fun {}({}): {}", name, arguments, value_to_string(rettype.clone(), Languages::Kotlin)).as_str());
         buffer.push_str("{\n  ");
         buffer.push_str(&transcompile_kotlin(a.clone(), 0, ident + 1));
-        buffer.push_str("}")
+        buffer.push('}')
       },
       TokenKind::Newline => {
         buffer.push('\n');
@@ -482,7 +479,7 @@ fn transcompile_kotlin(input: Vec<Token>, mut count: usize, ident: usize) -> Str
         }
       },
       TokenKind::Identifier => {
-        buffer.push_str(" ");
+        buffer.push(' ');
         buffer.push_str(&input.get(count).unwrap().value);
       },
       TokenKind::VariableCall => {
@@ -502,20 +499,16 @@ fn transcompile_kotlin(input: Vec<Token>, mut count: usize, ident: usize) -> Str
             ], 0, ident),
           ).as_str());
           count += 2;
-          loop {
-            if let TokenKind::Condition(_) = &input.get(count).unwrap().kind {
-              buffer.push_str(format!(
-                "({})", 
-                transcompile_kotlin(vec![
-                  input.get(count - 1).unwrap().clone(),
-                  input.get(count).unwrap().clone(),
-                  input.get(count + 1).unwrap().clone()
-                ], 0, ident),
-              ).as_str());
-              count += 2;
-            } else {
-              break
-            }
+          while let TokenKind::Condition(_) = &input.get(count).unwrap().kind {
+            buffer.push_str(format!(
+              "({})", 
+              transcompile_kotlin(vec![
+                input.get(count - 1).unwrap().clone(),
+                input.get(count).unwrap().clone(),
+                input.get(count + 1).unwrap().clone()
+              ], 0, ident),
+            ).as_str());
+            count += 2;
           }
         } else if let TokenKind::Boolean(a) = &input.get(count).unwrap().kind {
           if *a {
@@ -529,9 +522,9 @@ fn transcompile_kotlin(input: Vec<Token>, mut count: usize, ident: usize) -> Str
         };
       },
       TokenKind::Scope(a) => {
-        buffer.push_str("{");
+        buffer.push('{');
         buffer.push_str(&transcompile_kotlin(a.clone(), 0, ident + 1));
-        buffer.push_str("}");
+        buffer.push('}');
       },
       TokenKind::String(a) => {
         buffer.push_str(a);
