@@ -72,11 +72,34 @@ pub struct Token { kind: TokenKind, value: String }
 impl Lexer {
   pub fn new(contents: String, path: String) -> Self { Self { contents: contents.chars().collect(), path } }
   #[allow(clippy::expect_fun_call)]
+  pub fn get_counts(&self, limit: usize, mut count: usize) -> HashMap<usize, usize>{
+    let mut scoper = HashMap::new();
+    while limit > count {
+      if self.current_char(count) == '{' {
+        let counter = count;
+        count += 1;
+        while self.current_char(count) != '}' {
+          if cfg!(debug_assertions) {
+            println!("{}: {}", count, self.current_char(count))
+          }
+          if self.current_char(count) == '{' {
+            scoper.extend(self.get_counts(limit, count));
+          }
+          count += 1;
+        }
+        scoper.insert(counter, count);
+      }
+      count += 1;
+    }
+    scoper
+  }
   pub fn lex(&mut self, mut count: usize, limit: usize, variables: Option<Vec<Token>>) -> Vec<Token> {
     let mut tokens: Vec<Token> = Vec::new();
-    for i in variables.unwrap_or(Vec::new()).into_iter() {
+    for i in variables.clone().unwrap_or(Vec::new()).into_iter() {
       tokens.push(i)
     }
+
+    let scoper: HashMap<usize, usize> = self.get_counts(limit, count);
 
     while limit > count {
       let c = self.current_char(count);
@@ -101,15 +124,13 @@ impl Lexer {
           count += 1;
         },
         '=' => {
-          if get_token_kind(&tokens) == TokenKind::Identifier {
+          count += 1;
+          if self.current_char(count) != '=' {
             tokens.push( Token { kind: TokenKind::Assign, value: "=".to_string() } );
-            count += 1;
           } else {
-            count += 1;
-            if self.current_char(count) == '=' {
-              tokens.push( Token { kind: TokenKind::Condition(Cond::Equal), value: "==".to_string() } );
-            }
+            tokens.push( Token { kind: TokenKind::Condition(Cond::Equal), value: "==".to_string()} );
           }
+          count += 1;
         },
         '!' => {
           count += 1;
@@ -132,16 +153,17 @@ impl Lexer {
           count += 1;
         },
         '{' => {
+          let close = scoper.get(&count).unwrap();
           count += 1;
           
           let mut buffer = String::new();
 
-          while self.current_char(count) != '}' {
+          while count != *close {
             buffer.push(self.current_char(count));
             count += 1;
           }
 
-          tokens.push( Token { kind: TokenKind::Scope(self.lex(count - buffer.len(), count, None)), value: buffer} )
+          tokens.push( Token { kind: TokenKind::Scope(self.lex(count - buffer.len(), count, variables.clone())), value: buffer} )
         },
         _ if c.is_numeric() => {
           let mut buffer = String::new();
@@ -232,7 +254,6 @@ impl Lexer {
                       };
 
                       args.insert(name, value);
-                      buffer.clear();
                     }
                   } else { 
                     if self.current_char(count) != ',' || self.current_char(count) == '('{ buffer.push(self.current_char(count)); }
@@ -270,7 +291,9 @@ impl Lexer {
                 count += 1;
               }
 
-              self.lex(count - buffer3.len(), count, None); // this is infinite loop
+              self.lex(count - buffer3.len(), count, None);
+
+              buffer = buffer3.clone();
 
               Some(TokenKind::Function {
                 name: fname, 
@@ -286,7 +309,7 @@ impl Lexer {
                   "any" => Value::Any,
                   "list" => Value::List,
                   "dict" => Value::Dict,
-                  _ => panic!("SyntaxError {}", buffer.clone())
+                  _ => panic!("SyntaxError {}", buffer2.clone())
                 }
               })
             },
@@ -339,6 +362,8 @@ impl Lexer {
           
           if let Some(k) = kind { 
             tokens.push(Token { kind: k, value: buffer }); 
+          } else {
+            tokens.push(Token { kind: TokenKind::Identifier, value: buffer} );
           }
         },
         _ => {
@@ -390,11 +415,15 @@ fn transcompile(
 
 fn transcompile_kotlin(input: Vec<Token>, mut count: usize, ident: usize) -> String {
   let mut buffer = String::new();
+  println!("asd: {:#?}", input);
   while input.get(count).is_some() {
     if count != 0 {
       if ident != 0 && input.get(count - 1).unwrap().kind == TokenKind::Newline {
         buffer.push_str("  ".repeat(ident).as_str());
       }
+    }
+    if cfg!(debug_assertions) {
+      println!("{}: {:#?}", count, input.get(count).unwrap().clone());
     }
     match &mut input.get(count).unwrap().kind.clone() {
       TokenKind::Assign => { buffer.push_str(" = ") },
@@ -423,18 +452,8 @@ fn transcompile_kotlin(input: Vec<Token>, mut count: usize, ident: usize) -> Str
         buffer.push_str(f);
       },
       TokenKind::Function{name, args, scope, rettype} => {
-        if let TokenKind::Scope(a) = &mut scope.kind {
-          a.insert(0, Token { kind: TokenKind::Newline, value: "\n".to_string() });
-        }
         let mut arguments = String::new();
         let TokenKind::Scope(a) = &scope.kind else { unreachable!() };
-        let mut b: Option<Vec<Token>> = None; 
-        for c in a.iter() {
-          if let TokenKind::Scope(e) = &c.kind {
-            b = Some(e.clone())
-          }
-        }
-        drop(a);
         let len = if args.len() == 0 { 0 } else { args.len() - 1 };
         for (i, (k, v)) in args.iter().enumerate() {
           arguments.push_str(format!("{}: {}", k, value_to_string(v.clone(), Languages::Kotlin)).as_str());
@@ -442,10 +461,11 @@ fn transcompile_kotlin(input: Vec<Token>, mut count: usize, ident: usize) -> Str
             arguments.push_str(", ")
           }
         }
+        println!("{}", transcompile_kotlin(a.clone(), 0, ident + 1));
         drop(len);
         buffer.push_str(format!("fun {}({}): {}", name, arguments, value_to_string(rettype.clone(), Languages::Kotlin)).as_str());
-        buffer.push_str("{  ");
-        buffer.push_str(&transcompile_kotlin(b.clone().unwrap(), 0, ident + 1));
+        buffer.push_str("{\n  ");
+        buffer.push_str(&transcompile_kotlin(a.clone(), 0, ident + 1));
         buffer.push_str("}")
       },
       TokenKind::Newline => {
@@ -467,8 +487,56 @@ fn transcompile_kotlin(input: Vec<Token>, mut count: usize, ident: usize) -> Str
       },
       TokenKind::VariableCall => {
         buffer.push_str(&input.get(count).unwrap().value);
+      },
+      TokenKind::If => {
+        buffer.push_str("if");
+        count += 1;
+        if let TokenKind::Condition(_) = &input.get(count + 1).unwrap().kind {
+          count += 1;
+          buffer.push_str(format!(
+            "({})", 
+            transcompile_kotlin(vec![
+              input.get(count - 1).unwrap().clone(),
+              input.get(count).unwrap().clone(),
+              input.get(count + 1).unwrap().clone()
+            ], 0, ident),
+          ).as_str());
+          count += 2;
+          loop {
+            if let TokenKind::Condition(_) = &input.get(count).unwrap().kind {
+              buffer.push_str(format!(
+                "({})", 
+                transcompile_kotlin(vec![
+                  input.get(count - 1).unwrap().clone(),
+                  input.get(count).unwrap().clone(),
+                  input.get(count + 1).unwrap().clone()
+                ], 0, ident),
+              ).as_str());
+              count += 2;
+            } else {
+              break
+            }
+          }
+        } else if let TokenKind::Boolean(a) = &input.get(count).unwrap().kind {
+          if *a {
+            buffer.push_str("true")
+          } else {
+            buffer.push_str("false")
+          }
+          count += 1;
+        } else {
+          panic!("No condition after if")
+        };
+      },
+      TokenKind::Scope(a) => {
+        buffer.push_str("{");
+        buffer.push_str(&transcompile_kotlin(a.clone(), 0, ident + 1));
+        buffer.push_str("}");
+      },
+      TokenKind::String(a) => {
+        buffer.push_str(a);
       }
-      _ => todo!()
+      _ => panic!("Not yet implemented, {:#?}", input.get(count).unwrap().clone().kind)
     }
     count += 1;
   }
