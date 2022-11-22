@@ -1,23 +1,14 @@
-// this is comment
-
-/*
-  this is multi-line comment.
-*/
-
-import module.space
-
-// this is function
-function main { f: int, f2: int ->
-  print("hello world!")
-
-  // if "a" == "a" then print("hello world!")
-  if "a" == "a" or "b" == "b" and "c" == "c" {
-      print("hello world!")
+// comment
+/* comment */
+function main {a: int, b: int -> 
+  val ac = a
+  val ab = b
+  ac = lambda {  } -> void
+  while true {ac: int ->
+    sleep(a, b) // err
+    sleep(ac, ac) // not err
+    if false == false {} else if false != false {} else {}
+    break
   }
-
-  mut a = 3.12 // this is mutable variable
-  unmut b = 3 // this is unmutable variable
-    
-  print(a)
-  end a
-} -> float
+  end ac  
+} -> int
