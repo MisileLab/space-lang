@@ -1,4 +1,30 @@
-COMMENT = _{
+comment = {
     "/*" ~ (!"*/" ~ ANY)* ~ "*/" |
-    "//" ~ ANY ~ "\n"
+    "//" ~ (!"\n" ~ ANY)* ~ (!"\n" | "\n")
 }
+function = {
+	"function" ~ " "* ~ (!(" " | "{") ~ ANY)+ ~ " "* ~ scope
+}
+functioncall = {
+	(!(" " | "(" | ")") ~ ANY)* ~ "(" ~ (!(")") ~ ANY)* ~ ")"
+}
+scope = {
+	"{" ~ (" " | arg)* ~ scopesummary ~ "}"
+}
+scopesummary = {
+	(!"}" ~ ANY)*
+}
+arg = { 
+(!(":" | " " | ",") ~ ANY)* ~ ":" ~ " "* ~ (!(" " | "-" | ">") ~ ANY)* ~ " "* ~ "->" 
+| (!("," | " " | ":") ~ ANY)* ~ ":" ~ " "* ~ (!("," | " ") ~ ANY)* ~ " "* ~ ","} 
+varaibleimmu = { "immu" ~ " " ~ variable }
+variablemu = { "mut" ~ " " ~ variable }
+variable = { (!(" " | "=") ~ ANY)* ~ " "* ~ "=" ~ " "* ~ (!"\n" ~ ANY)* }
+repeatwhile = { "while" ~ " "* ~ (bool | cond) ~ " "* ~ scope }
+cond = { bool ~ operator ~ bool | bool ~ operator ~ scope | scope ~ operator ~ scope | scope ~ operator ~ bool}
+operator = { "==" | "!=" | "and" | "or" }
+types = { string | float | int | bool }
+string = { "'" ~ (!("'") ~ ANY)* ~ "'" }
+int = { ("0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9")+ }
+float = { int ~ "." ~ int }
+bool = { "true" | "false" }
