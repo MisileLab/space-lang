@@ -3,10 +3,10 @@ comment = {
     "//" ~ (!"\n" ~ ANY)* ~ (!"\n" | "\n")
 }
 function = {
-	"function" ~ " "* ~ (!(" " | "{") ~ ANY)+ ~ " "* ~ scope
-}
+	"function" ~ " "* ~ name ~ " "* ~ scope
+  }
 functioncall = {
-	(!(" " | "(" | ")") ~ ANY)* ~ "(" ~ (!(")") ~ ANY)* ~ ")"
+	name ~ (!")" ~ name)*
 }
 scope = {
 	"{" ~ (" " | arg)* ~ scopesummary ~ "}"
@@ -20,11 +20,14 @@ arg = {
 varaibleimmu = { "immu" ~ " " ~ variable }
 variablemu = { "mut" ~ " " ~ variable }
 variable = { (!(" " | "=") ~ ANY)* ~ " "* ~ "=" ~ " "* ~ (!"\n" ~ ANY)* }
-repeatwhile = { "while" ~ " "* ~ (bool | cond) ~ " "* ~ scope }
-cond = { bool ~ operator ~ bool | bool ~ operator ~ scope | scope ~ operator ~ scope | scope ~ operator ~ bool}
+repeatwhile = { "while" ~ " "* ~ cond ~ " "* ~ scope }
+cond = { bool | (!(" " | operator) ~ ANY)* ~ " "* ~ operator ~ " "* ~ (!(" " | operator) ~ ANY)* | (!" " ~ ANY)*}
 operator = { "==" | "!=" | "and" | "or" }
 types = { string | float | int | bool }
 string = { "'" ~ (!("'") ~ ANY)* ~ "'" }
 int = { ("0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9")+ }
 float = { int ~ "." ~ int }
 bool = { "true" | "false" }
+lambdafun = { "lambda" ~ " "* ~ scope }
+name = { (!(" " | "." | "," | ";" | "=" | "!" | "\n" | "{" | "}" 
+| "(" | ")") ~ ANY)* }
