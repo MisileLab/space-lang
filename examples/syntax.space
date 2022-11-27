@@ -1,6 +1,6 @@
 // comment
 /* comment */
-function main {a: int, b: int -> 
+function main {a: int, b: int
   val ac = a
   val ab = b
   ac = lambda {  } -> void
