@@ -14,4 +14,4 @@ edition = "2021"
 tokio = { version = "1.22.0", features = ["fs", "io-util", "macros", "rt-multi-thread"] }
 pest = { version = "2.5.0" }
 pest_derive = "2.5.0"
-clap = { version = "4.0.27", features = ["derive"] }
+clap = { version = "4.0.29", features = ["derive"] }
