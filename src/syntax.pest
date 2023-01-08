@@ -23,6 +23,6 @@ lambdafun = { "lambda" ~ " "* ~ scope }
 end = { "end" ~ " "* ~ (statement | name) }
 name = { (!(" " | "." | "," | ";" | "=" | "!" | "\n" | "{" | "}" 
 | "(" | ")" | ":" ) ~ ANY)+ }
-statement = {(comment | function | functioncall | scope | arg
+statement = {(comment | name | function | functioncall | scope | arg
 | variableimmu | variablemu | variable | repeatwhile | types | lambdafun
 )}
