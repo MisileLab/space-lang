@@ -2,7 +2,7 @@ extern crate pest;
 #[macro_use]
 extern crate pest_derive;
 
-use inkwell::context::Context;
+// use inkwell::context::Context;
 use pest::Parser;
 use std::env::args;
 use tokio::fs::read_to_string;
