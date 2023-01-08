@@ -14,6 +14,34 @@ struct IdentParser;
 
 pub enum Operator { Equal, NotEqual, And, Or }
 pub enum Types { String(String), Float(DynaDecimal<usize, u8>), Int(DynaInt<u32, u64>), Bool(bool) }
+pub enum TypeOrAstTree { Type(Types), AstNode(AstTree) }
+pub enum Cond { 
+  Bool(Types),
+  Variable(String), 
+  Statements {
+    statement1: Box<AstTree>, 
+    operator: Operator, 
+    statement2: Box<AstTree>
+  } 
+}
+pub enum AstTree {
+  Function {name: Box<AstTree>, scope: Box<AstTree>},
+  FunctionCall {name: Box<AstTree>, args: Box<Vec<TypeOrAstTree>>},
+  Scope {summary: Box<AstTree>},
+  ScopeSummary {statements: Box<Vec<AstTree>>},
+  Arg {name: Box<AstTree>, argtype: Types},
+  VariableImmu {variable: Box<AstTree>},
+  VariableMu {variable: Box<AstTree>},
+  Variable {name: Box<AstTree>, statement: Box<AstTree>},
+  RepeatWhile {cond: Box<AstTree>},
+  Cond {cond: Cond},
+  Operator {op: Operator},
+  Types {t: Types},
+  LambdaFun {scope: Box<AstTree>},
+  End {scope: Box<AstTree>},
+  Name {name: String},
+  Statement {st: Box<AstTree>}
+}
 
 #[tokio::main]
 async fn main() {
