@@ -12,7 +12,7 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1.24.1", features = ["fs", "io-util", "macros", "rt-multi-thread"] }
-pest = { version = "2.5.2" }
+pest = { version = "2.5.3" }
 pest_derive = "2.5.2"
 clap = { version = "4.0.32", features = ["derive"] }
 inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "master", features = ["llvm14-0"] }
