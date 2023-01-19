@@ -3,7 +3,8 @@ use std::{
   env, 
   path::Path,
   collections::HashMap,
-  mem::discriminant
+  mem::discriminant,
+  any::Any
 };
 
 use inkwell::OptimizationLevel;
@@ -11,6 +12,7 @@ use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::execution_engine::{ExecutionEngine, JitFunction};
 use inkwell::module::Module;
+use inkwell::types::BasicTypeEnum;
 
 #[derive(Debug)]
 pub struct Lexer { pub contents: Vec<char>, path: String }
@@ -392,40 +394,40 @@ struct CodeGen<'ctx> {
   execution_engine: ExecutionEngine<'ctx>,
 }
 
-type mainFun = unsafe extern "C" fn();
+type MainFun = unsafe extern "C" fn();
 
 impl<'ctx> CodeGen<'ctx> {
-  fn compile(&self, tokens: Vec<Token>) -> Option<JitFunction<mainFun>> {
-    let i: usize = 0;
-    while len(tokens.clone()) >= i {
-      match i.kind {
+  fn compile(&self, tokens: Vec<Token>) -> Option<JitFunction<MainFun>> {
+    let mut i: usize = 0;
+    while tokens.clone().len() >= i {
+      match tokens[i].clone().kind {
         TokenKind::None => {},
         TokenKind::Newline => {},
         TokenKind::List => {panic!("No list")},
         TokenKind::Dict => {panic!("No dict")},
         TokenKind::Boolean(_) => panic!("No bool"),
         TokenKind::VariableCall => todo!(),
-        TokenKind::Module { tokens: _tokens, path: _ } => {compile(_tokens)},
+        TokenKind::Module { tokens: _tokens, path: _ } => {self.compile(_tokens);},
         TokenKind::Function { name, args, scope, rettype } => {
-          let args2 = Vec::new();
+          let mut args2 = Vec::new();
           for (i, i2) in args {
-            let typer = match i2 {
+            let typer: BasicTypeEnum = match i2 {
               Value::Any => {unimplemented!()},
-              Value::Boolean => self.context.bool_type(),
+              Value::Boolean => BasicTypeEnum::IntType(self.context.bool_type()),
               Value::Dict => {unimplemented!()},
               Value::List => {unimplemented!()},
-              Value::Float => self.context.f64_type(),
-              Value::Integer => self.context.i64_type(),
+              Value::Float => BasicTypeEnum::FloatType(self.context.f64_type()),
+              Value::Integer => BasicTypeEnum::IntType(self.context.i64_type()),
               Value::String => {
-                let strs = Vec::new();
-                for _ in (0..20) {
-                  strs.append(self.context.i8_type())
+                let mut strs: Vec<BasicTypeEnum> = Vec::new();
+                for _ in 0..20 {
+                  strs.push(BasicTypeEnum::IntType(self.context.i8_type()))
                 }
-                self.context.struct_type(&strs, false)
+                BasicTypeEnum::StructType(self.context.struct_type(&strs, false))
               },
-              Value::Void => self.context.void_type()
+              Value::Void => {panic!("No void type in function")}
             };
-            args2.append(typer);
+            args2.push(typer);
           }
         },
         TokenKind::FunctionCall(_args) => {
