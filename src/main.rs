@@ -1,18 +1,22 @@
+#![feature(allocator_api)]
+
 use std::{
   fs, 
   env, 
   path::Path,
   collections::HashMap,
   mem::discriminant,
-  any::Any
+  any::Any,
+  iter::zip
 };
 
 use inkwell::OptimizationLevel;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
-use inkwell::execution_engine::{ExecutionEngine, JitFunction};
+use inkwell::execution_engine::{ExecutionEngine, JitFunction, UnsafeFunctionPointer};
 use inkwell::module::Module;
-use inkwell::types::BasicTypeEnum;
+use inkwell::types::{BasicTypeEnum, VoidType, BasicType, BasicMetadataTypeEnum};
+use inkwell::values::{FloatValue, IntValue, StructValue};
 
 #[derive(Debug)]
 pub struct Lexer { pub contents: Vec<char>, path: String }
@@ -58,6 +62,22 @@ enum Value {
   List,
   Dict,
   Any
+}
+
+#[derive(Debug)]
+enum ActualValue<'a> {
+  Integer(IntValue<'a>),
+  Float(FloatValue<'a>),
+  String(StructValue<'a>),
+  Boolean(bool),
+  List(Vec<Box<dyn Any>>),
+  Dict(HashMap<Box<dyn Any>, Box<dyn Any>>)
+}
+
+#[derive(Debug, Clone)]
+enum BasicTypeEnumExtended<'a> {
+  BasicEnum(BasicTypeEnum<'a>),
+  Void(VoidType<'a>)
 }
 
 impl Default for TokenKind {
@@ -395,6 +415,7 @@ struct CodeGen<'ctx> {
 }
 
 type MainFun = unsafe extern "C" fn();
+// type Anyfunc = unsafe extern "C" fn (dyn Any, dyn Any, dyn Any, dyn Any, dyn Any, dyn Any, dyn Any, dyn Any, dyn Any) -> (dyn Any);
 
 impl<'ctx> CodeGen<'ctx> {
   fn compile(&self, tokens: Vec<Token>) -> Option<JitFunction<MainFun>> {
@@ -410,29 +431,68 @@ impl<'ctx> CodeGen<'ctx> {
         TokenKind::Module { tokens: _tokens, path: _ } => {self.compile(_tokens);},
         TokenKind::Function { name, args, scope, rettype } => {
           let mut args2 = Vec::new();
+          let mut args3 = Vec::new();
           for (i, i2) in args {
-            let typer: BasicTypeEnum = match i2 {
+            let typer: BasicMetadataTypeEnum = match i2 {
               Value::Any => {unimplemented!()},
-              Value::Boolean => BasicTypeEnum::IntType(self.context.bool_type()),
+              Value::Boolean => BasicMetadataTypeEnum::IntType(self.context.bool_type()),
               Value::Dict => {unimplemented!()},
               Value::List => {unimplemented!()},
-              Value::Float => BasicTypeEnum::FloatType(self.context.f64_type()),
-              Value::Integer => BasicTypeEnum::IntType(self.context.i64_type()),
+              Value::Float => BasicMetadataTypeEnum::FloatType(self.context.f64_type()),
+              Value::Integer => BasicMetadataTypeEnum::IntType(self.context.i64_type()),
               Value::String => {
                 let mut strs: Vec<BasicTypeEnum> = Vec::new();
                 for _ in 0..20 {
                   strs.push(BasicTypeEnum::IntType(self.context.i8_type()))
                 }
-                BasicTypeEnum::StructType(self.context.struct_type(&strs, false))
+                BasicMetadataTypeEnum::StructType(self.context.struct_type(&strs, false))
               },
               Value::Void => {panic!("No void type in function")}
             };
             args2.push(typer);
+            args3.push(i);
+          };
+
+          let ret: BasicTypeEnumExtended = match rettype {
+            Value::Any => {unimplemented!()},
+            Value::Boolean => BasicTypeEnumExtended::BasicEnum(BasicTypeEnum::IntType(self.context.bool_type())),
+            Value::Dict => {unimplemented!()},
+            Value::List => {unimplemented!()},
+            Value::Float => BasicTypeEnumExtended::BasicEnum(BasicTypeEnum::FloatType(self.context.f64_type())),
+            Value::Integer => BasicTypeEnumExtended::BasicEnum(BasicTypeEnum::IntType(self.context.i64_type())),
+            Value::String => {
+              let mut strs: Vec<BasicTypeEnum> = Vec::new();
+              for _ in 0..20 {
+                strs.push(BasicTypeEnum::IntType(self.context.i8_type()))
+              }
+              BasicTypeEnumExtended::BasicEnum(BasicTypeEnum::StructType(self.context.struct_type(&strs, false)))
+            },
+            Value::Void => BasicTypeEnumExtended::Void(self.context.void_type())
+          };
+
+          let fn_type = match ret {
+            BasicTypeEnumExtended::BasicEnum(a) => a.fn_type(&args2[..], false),
+            BasicTypeEnumExtended::Void(v) => v.fn_type(&args2[..], false)
+          };
+          let function = self.module.add_function(&name, fn_type, None);
+          self.builder.position_at_end(self.context.append_basic_block(function, "entry"));
+
+          let mut variables: HashMap<String, ActualValue> = HashMap::new();
+          for ((i, i2), i3) in zip(args3.iter().enumerate(), args2) {
+            let _temp = function.get_nth_param(i.try_into().unwrap()).unwrap();
+            let temp: ActualValue = match i3 {
+              BasicMetadataTypeEnum::FloatType(_) => ActualValue::Float(_temp.into_float_value()),
+              BasicMetadataTypeEnum::IntType(_) => ActualValue::Integer(_temp.into_int_value()),
+              BasicMetadataTypeEnum::StructType(_) => ActualValue::String(_temp.into_struct_value()),
+              _ => { unimplemented!(); }
+            };
+            variables.insert(i2.to_string(), temp);
           }
         },
         TokenKind::FunctionCall(_args) => {
+
           let args = _args.split(",").collect::<Vec<&str>>();
-          
+          // unsafe { let fnlol: JitFunction<Anyfunc> = self.execution_engine.get_function(&tokens[i].clone().value).unwrap(); }
         },
         TokenKind::Scope(_) => todo!(),
         TokenKind::String(_) => todo!(),
@@ -459,7 +519,7 @@ async fn main() {
   let contents = fs::read_to_string(&file).expect(&format!("Couldn't read this file, result is {}", file));
 
   let mut lexer = Lexer::new(contents, path);
-  let mut lex = lexer.lex(0, lexer.contents.len(), None);
+  let lex = lexer.lex(0, lexer.contents.len(), None);
   println!("{:#?}", &lex);
 
   println!("Ready!");
