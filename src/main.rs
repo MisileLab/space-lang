@@ -31,7 +31,7 @@ enum TokenKind {
   VariableCall,
   Module{ tokens: Vec<Token>, path: String },
   Function{ name: String, args: HashMap<String, Value>, scope: Box<Token>, rettype: Value },
-  FunctionCall(String),
+  FunctionCall(Vec<Value>),
   Scope(Vec<Token>),
   String(String),
   End(String),
@@ -370,9 +370,22 @@ impl Lexer {
                     buffer2.push_str((tokens.iter().last().unwrap().value.clone() + ".").as_str());
                   }
                 }
-                let mut args = String::new();
+                let mut args = Vec::new();
                 while self.current_char(count) != ')' {
-                  args.push(self.current_char(count));
+                  let originalcount = count;
+                  while self.current_char(count) != ',' {
+                    count += 1;
+                  }
+                  let _org = match self.lex(originalcount, count, variables.clone())[0].kind {
+                    TokenKind::Boolean(_) => Value::Boolean,
+                    TokenKind::Dict => Value::Dict,
+                    TokenKind::Float(_) => Value::Float,
+                    TokenKind::Integer(_) => Value::Integer,
+                    TokenKind::List => Value::List,
+                    TokenKind::String(_) => Value::String,
+                    _ => unreachable!()
+                  };
+                  args.push(_org);
                   count += 1;
                 }
                 Some(TokenKind::FunctionCall(args))
@@ -415,7 +428,7 @@ struct CodeGen<'ctx> {
 }
 
 type MainFun = unsafe extern "C" fn();
-// type Anyfunc = unsafe extern "C" fn (dyn Any, dyn Any, dyn Any, dyn Any, dyn Any, dyn Any, dyn Any, dyn Any, dyn Any) -> (dyn Any);
+type Anyfunc = unsafe extern "C" fn (Option<Value>, Option<Value>, Option<Value>, Option<Value>, Option<Value>, Option<Value>, Option<Value>, Option<Value>, Option<Value>) -> Option<Value>;
 
 impl<'ctx> CodeGen<'ctx> {
   fn compile(&self, tokens: Vec<Token>) -> Option<JitFunction<MainFun>> {
@@ -490,14 +503,33 @@ impl<'ctx> CodeGen<'ctx> {
           }
         },
         TokenKind::FunctionCall(_args) => {
-
-          let args = _args.split(",").collect::<Vec<&str>>();
-          // unsafe { let fnlol: JitFunction<Anyfunc> = self.execution_engine.get_function(&tokens[i].clone().value).unwrap(); }
+          let mut args: Vec<Option<Value>> = Vec::new();
+          for i in 0..8 {
+            if _args.get(i).unwrap_or(&Value::Void) == &Value::Void {
+              args.push(None);
+            } else {
+              args.push(Some(_args[i].clone()));
+            }
+          }
+          unsafe {
+            let fnlol: JitFunction<Anyfunc> = self.execution_engine.get_function(&tokens[i].clone().value).unwrap(); 
+            fnlol.call(
+              args[0].clone(), 
+              args[1].clone(), 
+              args[2].clone(), 
+              args[3].clone(), 
+              args[4].clone(),
+              args[5].clone(), 
+              args[6].clone(),
+              args[7].clone(),
+              args[8].clone()
+            );
+          }
         },
         TokenKind::Scope(_) => todo!(),
         TokenKind::String(_) => todo!(),
         TokenKind::End(_) => todo!(),
-        TokenKind::Assign => todo!(),
+        TokenKind::Assign => unreachable!(),
         TokenKind::Variable { mutable } => todo!(),
         TokenKind::Identifier => todo!(),
         TokenKind::Integer(_) => todo!(),
