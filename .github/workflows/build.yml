@@ -28,12 +28,12 @@ jobs:
         path: |
           C:/Program Files/LLVM
           ./llvm
-        key: llvm-14.0
+        key: llvm-15.0
     - name: Install LLVM and Clang
       if: runner.os != 'macOS'
       uses: KyleMayes/install-llvm-action@v1
       with:
-        version: "14.0"
+        version: "15.0"
         cached: ${{ steps.cache-llvm.outputs.cache-hit }}
     - name: Install LLVM for macos
       if: runner.os == 'macOS'
