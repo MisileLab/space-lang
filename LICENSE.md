@@ -1,6 +1,6 @@
 # Misilelab license v2.0
 
-Default author information: h3 by MisileLaboratory, Klosie  
+Default author information: space-lang by fromu94, MisileLaboratory  
 You can override author in subproject like `Override author information: Base repository by Misile`
 
 ## library usage condition
